@@ -1,0 +1,54 @@
+// Tailscale ACL for an Odysseus tailnet shared between two users
+// (you + your wife). Drop this into the JSON editor at
+// https://login.tailscale.com/admin/acls/file and adjust the email
+// addresses + group names to match your accounts.
+//
+// What this gives you:
+//   - A `tag:odysseus` tag the EC2 host advertises on boot.
+//   - A `group:family` containing both your accounts.
+//   - HTTPS access from family devices to the Odysseus box on port 443
+//     (Tailscale Serve terminates TLS).
+//   - Tailscale SSH access for you (not your wife) into the box for ops.
+//   - No public-internet exposure (Funnel is NOT enabled).
+{
+  "tagOwners": {
+    // Anyone in group:admin can mint a node that advertises tag:odysseus.
+    // The EC2 user-data calls `tailscale up --advertise-tags=tag:odysseus`
+    // and the auth key you generated for deploy must be tagged the same.
+    "tag:odysseus": ["group:admin"]
+  },
+
+  "groups": {
+    // EDIT THESE: use the email addresses you signed up to Tailscale with.
+    "group:admin":  ["igor@example.com"],
+    "group:family": ["igor@example.com", "wife@example.com"]
+  },
+
+  "acls": [
+    // Everyone in group:family can reach Odysseus on HTTPS (Tailscale
+    // Serve listens on port 443 of the box's tailnet identity).
+    {
+      "action": "accept",
+      "src":    ["group:family"],
+      "dst":    ["tag:odysseus:443"]
+    }
+
+    // Note: this ACL deliberately does NOT add a blanket "accept all"
+    // rule. Other devices on your tailnet (laptop ↔ phone, etc.) will
+    // only be reachable to each other if you add explicit rules. If you
+    // already have a permissive ACL for your personal tailnet, merge
+    // these entries into it rather than replacing it.
+  ],
+
+  "ssh": [
+    // Tailscale SSH for ops — only you, only into the odysseus user.
+    // Your wife should NOT have SSH; she logs into Odysseus via the
+    // web UI like a normal user.
+    {
+      "action": "accept",
+      "src":    ["group:admin"],
+      "dst":    ["tag:odysseus"],
+      "users":  ["odysseus", "root"]
+    }
+  ]
+}

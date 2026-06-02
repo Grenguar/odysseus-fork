@@ -1,0 +1,514 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Odysseus self-hosted AI workspace on a single t4g.medium EC2 instance.
+  Private-only: no SSH key, no inbound ports. Access via Tailscale Serve
+  (https://odysseus.<tailnet>.ts.net) plus SSM Session Manager for ops.
+  ~$20-25/mo on-demand including the persistent root volume.
+
+Parameters:
+
+  InstanceType:
+    Type: String
+    Default: t4g.medium
+    AllowedValues: [t4g.small, t4g.medium, t4g.large]
+    Description: >
+      t4g.medium (4 GB) is the sweet spot for two-user daily use. Odysseus +
+      fastembed ONNX + Python web stack is heavier than Hermes; t4g.small
+      will swap under concurrent use. Step up to t4g.large only if you also
+      host local Ollama on this box.
+
+  AdminUsername:
+    Type: String
+    Default: igor
+    MinLength: 2
+    MaxLength: 32
+    AllowedPattern: '^[a-z][a-z0-9_-]+$'
+    Description: >
+      Username for the initial admin account. The actual password is NOT
+      baked into the template — first-boot setup writes a one-time token to
+      data/.setup_token (mode 0600) and the first visitor to /setup uses
+      that token to pick the password. See the README's "First login"
+      section. Lowercase letters, digits, hyphen/underscore only.
+
+  DataVolumeSizeGb:
+    Type: Number
+    Default: 30
+    MinValue: 20
+    MaxValue: 200
+    Description: >
+      Root EBS volume size in GB. 30 covers OS + Python venv + Odysseus +
+      typical chat history, attachments, calendar, and email metadata for
+      two users for a year-plus. Bump if you index large personal-doc
+      collections.
+
+  BackupRetentionDays:
+    Type: Number
+    Default: 14
+    MinValue: 1
+    MaxValue: 60
+    Description: >
+      How many days to keep daily EBS snapshots via DLM. Longer than the
+      hermes default (7) because Odysseus state is harder to reconstruct —
+      it contains your actual chats and email config, not just an agent
+      cache.
+
+  OdysseusGitRef:
+    Type: String
+    Default: main
+    Description: >
+      Branch, tag, or commit SHA to deploy from Grenguar/odysseus-fork.
+      Pin to a tag or SHA for reproducibility in production.
+
+Resources:
+
+  # ---- Networking: minimal VPC, public subnet, no public IP on the host
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.43.0.0/24
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags: [{Key: Name, Value: odysseus-vpc}]
+
+  Igw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{Key: Name, Value: odysseus-igw}]
+
+  IgwAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref Igw
+
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.43.0.0/28
+      AvailabilityZone: !Select [0, !GetAZs '']
+      # Public IP required for outbound to AWS APIs + dnf mirrors via the
+      # IGW (the IGW only proxies traffic for instances that have a public
+      # IP). The security group still has zero inbound rules, so the public
+      # IP is functionally inert except for the return path of outbound
+      # connections — Tailscale handles all actual access.
+      MapPublicIpOnLaunch: true
+      Tags: [{Key: Name, Value: odysseus-subnet}]
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{Key: Name, Value: odysseus-rt}]
+
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: IgwAttach
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref Igw
+
+  SubnetRtAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref Subnet
+      RouteTableId: !Ref RouteTable
+
+  # ---- Security group: zero inbound, narrow egress allowlist.
+  # Tailscale Serve terminates TLS on the box from the tailnet side, so we
+  # do NOT need to open 7000 or 443 to the internet. Outbound only.
+  InstanceSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Odysseus - no inbound, egress restricted to required protocols.
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS - GitHub, Tailscale control + DERP, package mirrors, model APIs
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP - dnf mirrors, OCSP
+        - IpProtocol: udp
+          FromPort: 41641
+          ToPort: 41641
+          CidrIp: 0.0.0.0/0
+          Description: Tailscale WireGuard direct
+        - IpProtocol: udp
+          FromPort: 3478
+          ToPort: 3478
+          CidrIp: 0.0.0.0/0
+          Description: STUN - Tailscale NAT traversal
+        - IpProtocol: tcp
+          FromPort: 587
+          ToPort: 587
+          CidrIp: 0.0.0.0/0
+          Description: SMTP STARTTLS (Odysseus email-send feature)
+        - IpProtocol: tcp
+          FromPort: 465
+          ToPort: 465
+          CidrIp: 0.0.0.0/0
+          Description: SMTPS implicit TLS
+        - IpProtocol: tcp
+          FromPort: 993
+          ToPort: 993
+          CidrIp: 0.0.0.0/0
+          Description: IMAPS (Odysseus email-receive)
+      Tags: [{Key: Name, Value: odysseus-sg}]
+
+  # ---- IAM role: SSM + read /odysseus/* params
+  # NB: both /odysseus/github/pat and /odysseus/tailscale/authkey are
+  # SecureStrings the operator put in SSM out-of-band before deploying.
+  # CFN can't create SecureStrings itself, which is why they're managed
+  # by deploy.sh's preflight check instead of as Resources here.
+  # The instance role only has GetParameter on /odysseus/* so we can't
+  # accidentally read other apps' secrets.
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: read-own-ssm-params
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/odysseus/*
+              # KMS decrypt for the SecureString PAT — uses the AWS-managed key.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'kms:ViaService': !Sub 'ssm.${AWS::Region}.amazonaws.com'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  # ---- The instance
+  OdysseusInstance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      Comment: >
+        Odysseus host. Bootstraps Tailscale, clones the fork via a
+        SecureString PAT from SSM, installs Python deps as the unprivileged
+        'odysseus' user, runs uvicorn under systemd, and fronts it with
+        Tailscale Serve (HTTPS on the tailnet).
+    Properties:
+      InstanceType: !Ref InstanceType
+      # AL2023 ARM64, resolved at deploy time:
+      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}'
+      IamInstanceProfile: !Ref InstanceProfile
+      KeyName: !Ref AWS::NoValue   # NO SSH KEY — use SSM or Tailscale SSH
+      SubnetId: !Ref Subnet
+      SecurityGroupIds: [!Ref InstanceSg]
+      Monitoring: false
+      MetadataOptions:
+        HttpTokens: required           # IMDSv2 enforced
+        HttpEndpoint: enabled
+        # Hop limit 1: only the host itself can read the instance role
+        # credentials. A web-rendered/agent RCE can no longer pivot to IMDS.
+        HttpPutResponseHopLimit: 1
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref DataVolumeSizeGb
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: false   # Keep data even if instance is terminated
+      Tags:
+        - {Key: Name,     Value: odysseus-agent}
+        - {Key: Backup,   Value: 'true'}     # consumed by DLM policy below
+        - {Key: Project,  Value: odysseus}
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          exec > >(tee -a /var/log/odysseus-bootstrap.log) 2>&1
+
+          # ---- 1. Base OS. AL2023 ships curl-minimal by default; asking
+          # for `curl` triggers a transaction-wide conflict because the
+          # mirror exposes every historical curl-minimal RPM version.
+          # curl-minimal is functionally adequate for our use. Adding
+          # --allowerasing also keeps us safe against future packaging
+          # drift where a base AMI ships an unexpected conflict.
+          #
+          # AL2023's default `python3` is 3.9 — Odysseus requires 3.10+
+          # (mcp / fastembed / new fastapi all gate on it). We install
+          # python3.11 explicitly and use it for the venv below; the
+          # system `python3` symlink is left alone so AWS CLI / dnf
+          # internals aren't disturbed.
+          dnf update -y --allowerasing
+          dnf install -y --allowerasing git tar gzip ca-certificates jq amazon-ssm-agent \
+                         python3.11 python3.11-pip python3.11-devel \
+                         gcc make libffi-devel openssl-devel sqlite-devel
+          systemctl enable --now amazon-ssm-agent
+          timedatectl set-timezone Europe/Madrid || true
+
+          # ---- 2. Tailscale (ARM64)
+          curl -fsSL https://pkgs.tailscale.com/stable/amazon-linux/2023/tailscale.repo \
+            -o /etc/yum.repos.d/tailscale.repo
+          dnf install -y tailscale
+          systemctl enable --now tailscaled
+
+          # SecureString: needs --with-decryption. The IAM role has
+          # kms:Decrypt scoped via the kms:ViaService condition to the
+          # SSM service in this region, so the AWS-managed SSM KMS key
+          # is the only one we can unwrap.
+          TS_KEY=$(aws ssm get-parameter --with-decryption \
+              --region ${AWS::Region} \
+              --name /odysseus/tailscale/authkey \
+              --query Parameter.Value --output text)
+
+          # --hostname=odysseus is what makes MagicDNS resolve the box as
+          # odysseus.<your-tailnet>.ts.net. Stable across reboots.
+          # --ssh enables Tailscale SSH for tailnet members tagged in the ACL.
+          tailscale up \
+              --authkey="$TS_KEY" \
+              --ssh \
+              --hostname=odysseus \
+              --accept-routes=false \
+              --advertise-tags=tag:odysseus
+          unset TS_KEY
+          # NB: we DO NOT delete /odysseus/tailscale/authkey after use —
+          # the key is reusable by design, and keeping it lets a stack
+          # replacement (or instance-replace via CFN update) re-auth
+          # automatically. Rotate it manually from the Tailscale admin
+          # when you want.
+
+          # ---- 3. Unprivileged service user
+          useradd -m -s /bin/bash odysseus
+          install -d -o odysseus -g odysseus -m 0755 /opt/odysseus
+
+          # ---- 4. Clone the fork via PAT pulled from SSM SecureString.
+          # The PAT lives only in a shell variable scoped to this clone; it
+          # is never written to disk. git's credential helper is NOT set,
+          # so the URL-embedded token is used once and forgotten.
+          GH_PAT=$(aws ssm get-parameter --with-decryption \
+              --region ${AWS::Region} \
+              --name /odysseus/github/pat \
+              --query Parameter.Value --output text)
+
+          sudo -u odysseus -H bash -lc "
+            set -e
+            cd /opt/odysseus
+            if [ ! -d app/.git ]; then
+              git clone --depth=1 --branch=${OdysseusGitRef} \
+                'https://x-access-token:${!GH_PAT}@github.com/Grenguar/odysseus-fork.git' \
+                app
+            fi
+            # Rewrite remote to the cleanly-authenticated form so future
+            # `git pull`s here read the PAT from a 600-mode credential file
+            # owned by the odysseus user. Less ergonomic than embedding it,
+            # but stops the token from leaking via `git remote -v` output.
+            cd app
+            git remote set-url origin https://github.com/Grenguar/odysseus-fork.git
+            mkdir -p \$HOME/.git-credentials.d
+            echo 'https://x-access-token:${!GH_PAT}@github.com' > \$HOME/.git-credentials
+            chmod 600 \$HOME/.git-credentials
+            git config --global credential.helper 'store --file=\$HOME/.git-credentials'
+          "
+          unset GH_PAT
+
+          # ---- 5. Python deps in a venv. Use python3.11 explicitly,
+          # not the system `python3` (3.9 on AL2023).
+          sudo -u odysseus -H bash -lc "
+            set -e
+            cd /opt/odysseus/app
+            python3.11 -m venv venv
+            . venv/bin/activate
+            pip install --upgrade pip wheel
+            pip install -r requirements.txt
+          "
+
+          # ---- 6. .env baseline. APP_BIND stays on loopback because
+          # Tailscale Serve proxies to it. SECURE_COOKIES=true because
+          # we serve HTTPS via Tailscale's Let's Encrypt cert.
+          # Heredocs inside CFN user-data: every line must be indented at
+          # least to the column the `|` block started at; otherwise YAML
+          # treats column-1 lines as ending the literal block. We use a
+          # printf chain instead of a heredoc to keep all content indented.
+          sudo -u odysseus -H bash -lc '
+            set -e
+            cd /opt/odysseus/app
+            if [ ! -f .env ]; then
+              {
+                echo "APP_BIND=127.0.0.1"
+                echo "APP_PORT=7000"
+                echo "AUTH_ENABLED=true"
+                echo "LOCALHOST_BYPASS=false"
+                echo "SECURE_COOKIES=true"
+              } > .env
+              chmod 600 .env
+            fi
+          '
+
+          # ---- 7. First-boot setup. setup.py creates data/ dirs, the SQLite
+          # DB, and writes data/.setup_token (mode 0600) — that token gates
+          # the first visit to /setup so a stranger can't claim the admin
+          # account during the bootstrap window. (See H8 in the security
+          # review for context.)
+          sudo -u odysseus -H bash -lc "
+            set -e
+            cd /opt/odysseus/app
+            . venv/bin/activate
+            ODYSSEUS_ADMIN_USER=${AdminUsername} \
+              ODYSSEUS_SKIP_RUN_HINT=1 \
+              ODYSSEUS_SKIP_ADMIN_PROMPT=1 \
+              python setup.py
+          "
+
+          # ---- 8. systemd unit for the FastAPI app.
+          # Same YAML-block-scalar caveat as the .env step above: we write
+          # the unit file via a sequence of `echo`-into-pipe lines so every
+          # line is column-indented inside the literal block.
+          {
+            echo "[Unit]"
+            echo "Description=Odysseus self-hosted AI workspace"
+            echo "After=network-online.target tailscaled.service"
+            echo "Wants=network-online.target"
+            echo ""
+            echo "[Service]"
+            echo "Type=simple"
+            echo "User=odysseus"
+            echo "Group=odysseus"
+            echo "WorkingDirectory=/opt/odysseus/app"
+            echo "EnvironmentFile=-/opt/odysseus/app/.env"
+            echo "ExecStart=/opt/odysseus/app/venv/bin/uvicorn app:app --host 127.0.0.1 --port 7000"
+            echo "Restart=on-failure"
+            echo "RestartSec=10"
+            echo "NoNewPrivileges=true"
+            echo "PrivateTmp=true"
+            echo "ProtectSystem=strict"
+            echo "ReadWritePaths=/opt/odysseus"
+            echo "ProtectKernelTunables=true"
+            echo "ProtectKernelModules=true"
+            echo "ProtectControlGroups=true"
+            echo ""
+            echo "[Install]"
+            echo "WantedBy=multi-user.target"
+          } >/etc/systemd/system/odysseus.service
+          systemctl daemon-reload
+          systemctl enable --now odysseus.service
+
+          # ---- 9. Tailscale Serve: expose 127.0.0.1:7000 as HTTPS on the
+          # tailnet. Visitors hit https://odysseus.<your-tailnet>.ts.net and
+          # get a real Let's Encrypt cert from Tailscale. Funnel is NOT
+          # enabled — this is tailnet-only, no public internet exposure.
+          # Requires MagicDNS + HTTPS Certificates enabled in the tailnet.
+          tailscale serve --bg --https=443 http://127.0.0.1:7000 || \
+            tailscale serve --bg --tls-terminated-tcp=443 tcp://127.0.0.1:7000 || true
+
+          # ---- 10. Print the setup token to bootstrap log + SSM (so you
+          # don't have to SSH in just to read it). The SSM parameter is a
+          # plain String — value is single-use and self-destructs once the
+          # admin account is created via /setup.
+          SETUP_TOKEN=$(cat /opt/odysseus/app/data/.setup_token 2>/dev/null || echo "")
+          if [ -n "$SETUP_TOKEN" ]; then
+            aws ssm put-parameter \
+                --region ${AWS::Region} \
+                --name /odysseus/setup-token \
+                --type String \
+                --value "$SETUP_TOKEN" \
+                --overwrite \
+                --description "One-time admin-setup token. Delete after first use." || true
+            echo ""
+            echo "================================================================"
+            echo "Odysseus is up. Open it in any tailnet-member browser:"
+            echo "    https://odysseus.<your-tailnet>.ts.net"
+            echo ""
+            echo "First visit will redirect to /setup. Use:"
+            echo "    Username:    ${AdminUsername}"
+            echo "    Setup token: $SETUP_TOKEN"
+            echo "    Password:    (you pick, min 8 chars)"
+            echo "================================================================"
+          fi
+
+          # ---- 11. Signal CloudFormation
+          /opt/aws/bin/cfn-signal -e $? \
+            --stack ${AWS::StackName} \
+            --resource OdysseusInstance \
+            --region ${AWS::Region} || true
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT20M
+
+  # ---- DLM daily snapshots
+  DlmRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: dlm.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole
+
+  DailySnapshotPolicy:
+    Type: AWS::DLM::LifecyclePolicy
+    Properties:
+      Description: Daily EBS snapshot of Odysseus state
+      State: ENABLED
+      ExecutionRoleArn: !GetAtt DlmRole.Arn
+      PolicyDetails:
+        PolicyType: EBS_SNAPSHOT_MANAGEMENT
+        ResourceTypes: [VOLUME]
+        TargetTags:
+          - {Key: Backup, Value: 'true'}
+        Schedules:
+          - Name: daily
+            TagsToAdd:
+              - {Key: Snapshot, Value: odysseus-daily}
+            CreateRule:
+              Interval: 24
+              IntervalUnit: HOURS
+              Times: ['03:00']
+            RetainRule:
+              Count: !Ref BackupRetentionDays
+            CopyTags: true
+
+Outputs:
+  InstanceId:
+    Description: EC2 instance ID
+    Value: !Ref OdysseusInstance
+
+  TailscaleUrl:
+    Description: Visit this in a browser of any tailnet-member device after first-boot completes (~5 min)
+    Value: 'https://odysseus.<your-tailnet>.ts.net'
+
+  SetupTokenLookup:
+    Description: Read the one-time setup token from SSM once bootstrap completes
+    Value: !Sub aws ssm get-parameter --region ${AWS::Region} --name /odysseus/setup-token --query Parameter.Value --output text
+
+  SsmShell:
+    Description: Open a root shell on the box without SSH
+    Value: !Sub aws ssm start-session --target ${OdysseusInstance} --region ${AWS::Region}
+
+  TailscaleSsh:
+    Description: SSH in as the service user via Tailscale (no key needed; ACL-driven)
+    Value: ssh odysseus@odysseus
+
+  BootstrapLog:
+    Description: Tail this on the box to watch first-boot
+    Value: sudo tail -f /var/log/odysseus-bootstrap.log
