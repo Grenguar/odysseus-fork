@@ -4,6 +4,8 @@ import logging
 from typing import Dict
 from cryptography.fernet import Fernet, InvalidToken
 
+from core.platform_compat import safe_chmod
+
 logger = logging.getLogger(__name__)
 
 class APIKeyManager:
@@ -11,16 +13,21 @@ class APIKeyManager:
         self.data_dir = data_dir
         self.api_keys_file = os.path.join(data_dir, "api_keys.json")
         self.key_file = os.path.join(data_dir, ".key")
-        
+
     def get_or_create_key(self) -> bytes:
         """Get or create encryption key for API keys"""
         if os.path.exists(self.key_file):
+            # Re-tighten on every load so older installs that wrote the
+            # key with default umask get repaired the next time the app
+            # starts. safe_chmod is a no-op on Windows.
+            safe_chmod(self.key_file, 0o600)
             with open(self.key_file, 'rb') as f:
                 return f.read()
         else:
             key = Fernet.generate_key()
             with open(self.key_file, 'wb') as f:
                 f.write(key)
+            safe_chmod(self.key_file, 0o600)
             return key
     
     def encrypt_api_key(self, api_key: str) -> str:

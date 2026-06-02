@@ -183,26 +183,53 @@ class UploadHandler:
         return False
     
     def is_safe_file_type(self, content_type: str, filename: str) -> bool:
-        """Check if file type is safe to store and serve."""
+        """Check if file type is safe to store and serve.
+
+        Two layers:
+          1. Hard denylist on executable/script content types and
+             extensions.
+          2. Extension/content mismatch detection for the high-leverage
+             image case — a file claiming .png that magic sees as a ZIP
+             or executable is almost always trying to bypass downstream
+             processors (PIL, vision pipeline) and is rejected.
+        """
         dangerous_types = {
             'application/x-executable', 'application/x-sharedlib',
             'application/x-dll', 'application/x-msdownload',
             'application/x-sh', 'application/x-bat', 'application/x-vbs',
-            'application/javascript', 'application/x-javascript'
+            'application/javascript', 'application/x-javascript',
+            # Polyglot/exe-as-data variants seen in the wild.
+            'application/x-mach-binary', 'application/x-elf',
+            'application/x-dosexec',
         }
-        
+
         dangerous_extensions = {
-            '.exe', '.dll', '.bat', '.cmd', '.vbs', 
-            '.ps1', '.jsp', '.asp', '.aspx'
+            '.exe', '.dll', '.bat', '.cmd', '.vbs',
+            '.ps1', '.jsp', '.asp', '.aspx',
+            '.scr', '.com', '.msi',
         }
-        
+
         if content_type in dangerous_types:
             return False
-        
+
         _, ext = os.path.splitext(filename.lower())
         if ext in dangerous_extensions:
             return False
-        
+
+        # Extension/content mismatch — reject the most common bypass:
+        # an image extension paired with non-image content. Skip when
+        # magic returned the generic fallback (no real signal).
+        image_extensions = {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff'}
+        if (ext in image_extensions
+                and content_type
+                and content_type != 'application/octet-stream'
+                and not content_type.startswith('image/')):
+            logger.warning(
+                "Rejected upload %r: extension %s claims image but magic says %s",
+                filename, ext, content_type,
+            )
+            return False
+
         return True
     
     def cleanup_old_uploads(self):

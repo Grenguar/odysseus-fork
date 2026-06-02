@@ -148,7 +148,9 @@ def test_create_token_attributes_owner_hashes_secret_and_returns_raw_once(monkey
 
     fake_bcrypt = SimpleNamespace(
         hashpw=lambda pw, salt: fake_hash,
-        gensalt=lambda: b"fakesalt",
+        # Production code pins rounds=12; the mock accepts it (and any
+        # future kwarg) to stay future-proof.
+        gensalt=lambda **_kw: b"fakesalt",
     )
     monkeypatch.setattr(mod, "bcrypt", fake_bcrypt)
 

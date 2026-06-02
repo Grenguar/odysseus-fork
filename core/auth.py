@@ -57,12 +57,31 @@ TOKEN_TTL = 60 * 60 * 24 * 7  # 7 days
 RESERVED_USERNAMES = frozenset({"internal-tool", "api", "demo", "system"})
 
 
+# Pin bcrypt cost factor explicitly so a future library default drift can't
+# silently weaken stored password hashes. 12 is the modern baseline.
+_BCRYPT_ROUNDS = 12
+
+
 def _hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return bcrypt.hashpw(
+        password.encode("utf-8"), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS)
+    ).decode("utf-8")
 
 
 def _verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+
+
+def _hash_backup_code(code: str) -> str:
+    """Hash a TOTP backup code with bcrypt so it can be stored at rest.
+    Backup codes are short, so we use a slightly lower cost than passwords
+    to keep verification (which iterates every stored hash) fast."""
+    return bcrypt.hashpw(code.encode("utf-8"), bcrypt.gensalt(rounds=10)).decode("utf-8")
+
+
+def _looks_hashed(value: str) -> bool:
+    """Is this string a bcrypt hash (vs a legacy plaintext backup code)?"""
+    return isinstance(value, str) and value.startswith(("$2a$", "$2b$", "$2y$"))
 
 
 class AuthManager:
@@ -83,6 +102,7 @@ class AuthManager:
         self._load_sessions()
         self._migrate_single_user()
         self._migrate_legacy_admin_role()
+        self._migrate_plaintext_backup_codes()
 
     def _load(self):
         try:
@@ -107,27 +127,60 @@ class AuthManager:
             self._config = {}
 
     def _load_sessions(self):
-        """Load persisted session tokens from disk, pruning expired ones."""
+        """Load persisted session tokens from disk, pruning expired ones.
+
+        Sessions are encrypted at rest with the same Fernet key as
+        secret_storage. Legacy plaintext files are read once and
+        rewritten encrypted on the first save (see _save_sessions)."""
         try:
-            if os.path.exists(self._sessions_path):
-                with open(self._sessions_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                now = time.time()
-                self._sessions = {k: v for k, v in data.items() if v.get("expiry", 0) > now}
-                pruned = len(data) - len(self._sessions)
-                if pruned > 0:
-                    self._save_sessions()
-                logger.info(f"Loaded {len(self._sessions)} session(s) from disk")
+            if not os.path.exists(self._sessions_path):
+                return
+            with open(self._sessions_path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            data = self._maybe_decrypt_sessions(raw)
+            now = time.time()
+            self._sessions = {k: v for k, v in data.items() if isinstance(v, dict) and v.get("expiry", 0) > now}
+            pruned = len(data) - len(self._sessions)
+            if pruned > 0 or isinstance(raw, dict) and "_enc" not in raw:
+                # Force a re-save to (a) drop expired entries and (b)
+                # upgrade any legacy plaintext file to the encrypted
+                # format.
+                self._save_sessions()
+            logger.info(f"Loaded {len(self._sessions)} session(s) from disk")
         except Exception as e:
             logger.error(f"Failed to load sessions: {e}")
             self._sessions = {}
 
+    @staticmethod
+    def _maybe_decrypt_sessions(raw):
+        """Accept either the new {"_enc": "<fernet>"} wrapper or the
+        legacy plain `{token: {...}}` dict. Returns the plaintext dict."""
+        if isinstance(raw, dict) and "_enc" in raw and isinstance(raw["_enc"], str):
+            try:
+                from src.secret_storage import _get_fernet  # internal but stable
+                blob = _get_fernet().decrypt(raw["_enc"].encode("ascii")).decode("utf-8")
+                return json.loads(blob)
+            except Exception as e:
+                logger.error(f"Failed to decrypt sessions.json (key rotated or corrupt): {e}")
+                return {}
+        return raw if isinstance(raw, dict) else {}
+
     def _save_sessions(self):
-        """Persist session tokens to disk (atomic, lock-guarded)."""
+        """Persist session tokens to disk (atomic, lock-guarded, encrypted)."""
         try:
             with self._sessions_lock:
                 snapshot = dict(self._sessions)
-            _atomic_write_json(self._sessions_path, snapshot)
+            try:
+                from src.secret_storage import _get_fernet
+                blob = _get_fernet().encrypt(json.dumps(snapshot).encode("utf-8")).decode("ascii")
+                _atomic_write_json(self._sessions_path, {"_enc": blob})
+            except Exception as enc_err:
+                # If the Fernet key is somehow unavailable (broken
+                # install, permission denied), fall back to plaintext so
+                # the app keeps working — but log loudly. This matches
+                # secret_storage's "fail open with a noisy log" policy.
+                logger.error(f"Sessions encryption unavailable, writing plaintext: {enc_err}")
+                _atomic_write_json(self._sessions_path, snapshot)
         except Exception as e:
             logger.error(f"Failed to save sessions: {e}")
 
@@ -156,6 +209,28 @@ class AuthManager:
                 user["is_admin"] = True
                 changed = True
                 logger.info(f"Migrated legacy admin role for '{username}'")
+        if changed:
+            self._save()
+
+    def _migrate_plaintext_backup_codes(self):
+        """Rehash any TOTP backup codes still stored as plaintext hex.
+        Old auth.json rows had codes saved as `secrets.token_hex(4)`
+        strings; an auth.json read by an attacker was effectively a
+        permanent 2FA bypass. We can't recover the original codes once
+        hashed, but unused codes haven't been shown to a user yet, so
+        upgrading them in place is harmless."""
+        changed = False
+        for username, user in self.users.items():
+            codes = user.get("totp_backup_codes") or []
+            if codes and any(not _looks_hashed(c) for c in codes):
+                user["totp_backup_codes"] = [
+                    c if _looks_hashed(c) else _hash_backup_code(c) for c in codes
+                ]
+                changed = True
+                logger.info(
+                    "Rehashed %d plaintext TOTP backup code(s) for '%s'",
+                    sum(1 for c in codes if not _looks_hashed(c)), username,
+                )
         if changed:
             self._save()
 
@@ -360,12 +435,30 @@ class AuthManager:
         self._config["users"][username]["totp_secret"] = secret
         self._config["users"][username]["totp_enabled"] = True
         self._config["users"][username].pop("totp_secret_pending", None)
-        # Generate backup codes
-        backup = [secrets.token_hex(4) for _ in range(8)]
-        self._config["users"][username]["totp_backup_codes"] = backup
+        # Generate backup codes. The plaintext list is stashed under a
+        # one-shot key the route reads + clears immediately, so it never
+        # touches disk. Persisted column holds only bcrypt hashes.
+        backup_plain = [secrets.token_hex(4) for _ in range(8)]
+        self._config["users"][username]["totp_backup_codes"] = [
+            _hash_backup_code(c) for c in backup_plain
+        ]
+        self._config["users"][username]["_totp_backup_codes_pending"] = backup_plain
         self._save()
         logger.info(f"2FA enabled for '{username}'")
         return True
+
+    def consume_pending_backup_codes(self, username: str) -> List[str]:
+        """Return + clear the one-shot plaintext backup codes shown to the
+        user immediately after 2FA setup. Empty list if already consumed
+        or 2FA was enabled with hashes only."""
+        username = username.strip().lower()
+        user = self._config.get("users", {}).get(username)
+        if not user:
+            return []
+        pending = user.pop("_totp_backup_codes_pending", None) or []
+        if pending:
+            self._save()
+        return list(pending)
 
     def totp_verify(self, username: str, code: str) -> bool:
         """Verify a TOTP code for login."""
@@ -376,14 +469,31 @@ class AuthManager:
         secret = user.get("totp_secret")
         if not secret:
             return True
-        # Check backup codes first
-        backup = user.get("totp_backup_codes", [])
-        if code in backup:
-            backup.remove(code)
-            self._config["users"][username]["totp_backup_codes"] = backup
-            self._save()
-            logger.info(f"Backup code used for '{username}' ({len(backup)} remaining)")
-            return True
+        # Check backup codes first. Stored entries are bcrypt hashes; legacy
+        # rows may still hold plaintext from before the hashing change —
+        # accept those for one use, then they're removed like any consumed
+        # code. The lock prevents a race where two concurrent logins each
+        # observe and burn the same code.
+        with self._sessions_lock:
+            backup = list(user.get("totp_backup_codes", []) or [])
+            matched_idx = -1
+            for idx, stored in enumerate(backup):
+                try:
+                    if _looks_hashed(stored):
+                        if bcrypt.checkpw(code.encode("utf-8"), stored.encode("utf-8")):
+                            matched_idx = idx
+                            break
+                    elif secrets.compare_digest(stored, code):
+                        matched_idx = idx
+                        break
+                except Exception:
+                    continue
+            if matched_idx >= 0:
+                backup.pop(matched_idx)
+                self._config["users"][username]["totp_backup_codes"] = backup
+                self._save()
+                logger.info(f"Backup code used for '{username}' ({len(backup)} remaining)")
+                return True
         totp = pyotp.TOTP(secret)
         return totp.verify(code, valid_window=1)
 

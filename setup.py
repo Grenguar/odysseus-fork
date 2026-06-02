@@ -70,8 +70,30 @@ def _prompt_admin_credentials():
     return username, password
 
 
+def _write_setup_token(data_dir: str) -> str:
+    """Generate + persist a one-time setup token at data/.setup_token.
+    The token is mode 0o600 (POSIX). /api/auth/setup checks for this file
+    and requires a matching token before creating the first admin; it
+    deletes the file on success. Replaces the previous "print a temp
+    password to the terminal" flow, which leaked the credential into
+    Docker logs / shell history forever (H8)."""
+    import secrets
+    token = secrets.token_urlsafe(24)
+    path = os.path.join(data_dir, ".setup_token")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(token)
+    # Lock the file down on POSIX. Windows: skip (user-profile ACLs cover it).
+    if os.name != "nt":
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    return token
+
+
 def create_default_admin():
-    """Create an initial admin user if none exists."""
+    """Create an initial admin user if none exists, or stage a one-time
+    setup token for the first visitor to claim the admin account."""
     auth_path = os.path.join(DATA_DIR, "auth.json")
     if os.path.exists(auth_path):
         print("  [skip] auth.json already exists")
@@ -81,42 +103,42 @@ def create_default_admin():
         import bcrypt
         import json
 
-        # Priority: env vars > interactive prompt > random password
         username = os.getenv("ODYSSEUS_ADMIN_USER", "").strip().lower()
         password = os.getenv("ODYSSEUS_ADMIN_PASSWORD", "").strip()
 
+        # Path A: env-provided credentials — preserve the operator flow
+        # where someone bakes ODYSSEUS_ADMIN_PASSWORD into a compose file
+        # they control. Nothing is printed.
         if username and password:
-            # Both provided via env — use them directly
-            pass
-        elif sys.stdin.isatty() and not os.getenv("ODYSSEUS_SKIP_ADMIN_PROMPT"):
-            # Interactive terminal — ask the user
+            hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+            with open(auth_path, "w", encoding="utf-8") as f:
+                json.dump({"users": {username: {"password_hash": hashed, "is_admin": True}}}, f, indent=2)
+            print(f"  [ok] Initial admin user created ({username}) from env vars")
+            return "created"
+
+        # Path B: interactive terminal — prompt for credentials.
+        if sys.stdin.isatty() and not os.getenv("ODYSSEUS_SKIP_ADMIN_PROMPT"):
             username, password = _prompt_admin_credentials()
-        else:
-            # Non-interactive (Docker, CI) — fall back to generated password
-            username = username or "admin"
-            password = password or __import__("secrets").token_urlsafe(18)
-
-        username = username or "admin"
-        hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-        auth_data = {
-            "users": {
-                username: {
-                    "password_hash": hashed,
-                    "is_admin": True,
-                }
-            }
-        }
-        with open(auth_path, "w", encoding="utf-8") as f:
-            json.dump(auth_data, f, indent=2)
-
-        if sys.stdin.isatty() and not os.getenv("ODYSSEUS_ADMIN_PASSWORD"):
+            hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+            with open(auth_path, "w", encoding="utf-8") as f:
+                json.dump({"users": {username: {"password_hash": hashed, "is_admin": True}}}, f, indent=2)
             print(f"  [ok] Admin account created ({username})")
-        else:
-            print(f"  [ok] Initial admin user created ({username})")
-            if not os.getenv("ODYSSEUS_ADMIN_PASSWORD"):
-                print(f"        Temporary password: {password}")
-                print(f"        ** Change it after first login. Set ODYSSEUS_ADMIN_PASSWORD to choose your own. **")
-        return "created"
+            return "created"
+
+        # Path C: non-interactive (Docker, CI) with no env override.
+        # Stage a one-time setup token instead of generating a password
+        # and dumping it into the logs. The first visitor enters the
+        # token at /setup, picks their own password, and the token file
+        # is deleted on success.
+        token = _write_setup_token(DATA_DIR)
+        print("  [ok] No admin configured yet — first visitor will be prompted to set one.")
+        print(f"        One-time setup token: {token}")
+        print( "        Enter it at http://<host>:7000/setup on first load.")
+        print( "        The token lives only in data/.setup_token (mode 0600) and is")
+        print( "        deleted once the admin account is created. Override this with")
+        print( "        ODYSSEUS_ADMIN_USER + ODYSSEUS_ADMIN_PASSWORD env vars if you")
+        print( "        want non-interactive provisioning.")
+        return "token_staged"
     except ImportError:
         print("  [warn] bcrypt not installed — skipping admin user creation")
         print("         Run: pip install bcrypt")
@@ -209,6 +231,8 @@ def main():
         print("Login with your admin credentials.\n")
     elif admin_status == "exists":
         print("Login with your existing admin credentials.\n")
+    elif admin_status == "token_staged":
+        print("Open the URL above and complete admin setup with the one-time token.\n")
     elif admin_status == "skipped":
         print("Admin creation did not happen: dependencies are missing.\nRun 'pip install bcrypt' and rerun setup.\n")
     elif admin_status == "failed":

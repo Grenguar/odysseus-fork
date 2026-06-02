@@ -45,6 +45,47 @@ def _autolink_urls(md_text: str) -> str:
     )
 
 
+_REPORT_DROP_TREE = frozenset({
+    "script", "style", "iframe", "object", "embed", "form",
+    "input", "button", "select", "textarea", "link", "meta", "base", "noscript",
+})
+_REPORT_SAFE_URL_RE = re.compile(
+    r"^\s*(https?:|mailto:|tel:|#|data:image/[a-z0-9+.\-]+;base64,)", re.I,
+)
+
+
+def _sanitize_report_html(html_str: str) -> str:
+    """Strip scripts and event handlers from markdown-rendered HTML.
+
+    The research report's markdown comes from web-crawled content, so any
+    raw <script> the attacker embedded in a source page would otherwise
+    pass straight through `markdown.markdown()` to the user's browser.
+    Mirrors the inbound-email sanitizer in routes/email_helpers but with
+    a more permissive tag allowlist suitable for a richly-formatted
+    report (headings, tables, code blocks, the markdown TOC, etc.)."""
+    if not html_str:
+        return html_str
+    try:
+        soup = BeautifulSoup(html_str, "html.parser")
+    except Exception:
+        return html_str
+    for tag in list(soup.find_all(True)):
+        name = (tag.name or "").lower()
+        if name in _REPORT_DROP_TREE:
+            tag.decompose()
+    for tag in list(soup.find_all(True)):
+        for attr in list(tag.attrs.keys()):
+            lowered = attr.lower()
+            if lowered.startswith("on"):
+                del tag.attrs[attr]
+                continue
+            if lowered in ("href", "src"):
+                val = tag.attrs.get(attr, "")
+                if not (isinstance(val, str) and _REPORT_SAFE_URL_RE.match(val)):
+                    del tag.attrs[attr]
+    return str(soup)
+
+
 def _md_to_html(md_text: str) -> str:
     """Convert markdown to HTML with common extensions."""
     md_text = _autolink_urls(md_text)
@@ -56,6 +97,9 @@ def _md_to_html(md_text: str) -> str:
             "toc": {"marker": "", "toc_depth": "2-3"},
         },
     )
+    # Strip <script>/handlers/javascript: URLs from the rendered output —
+    # the markdown source comes from web pages we don't control.
+    result = _sanitize_report_html(result)
     # Make external links open in new tab
     result = re.sub(
         r'<a href="(https?://)',

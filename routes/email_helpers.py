@@ -948,8 +948,106 @@ def _extract_attachment_to_disk(msg, index, target_dir):
     return None
 
 
+# --- Inbound HTML sanitization (security/H3) -------------------------------
+# Allowlist sanitizer for HTML bodies arriving over IMAP. Senders are not
+# trusted: a malicious email can embed <script>, event handlers, javascript:
+# URLs, or external <iframe>/<object>/<embed> to attack the user when the
+# message is rendered. We strip everything except a known-safe set of
+# formatting/structural tags, drop all on* attributes, and constrain href/src
+# schemes. The frontend still iframes the result for an extra layer, but the
+# backend now refuses to hand untrusted JS to the client in the first place.
+
+_INBOUND_ALLOWED_TAGS = frozenset({
+    "p", "div", "span", "br", "hr",
+    "b", "strong", "i", "em", "u", "s", "strike", "del", "ins", "sub", "sup", "small", "mark",
+    "a", "img",
+    "blockquote", "pre", "code", "kbd", "samp", "tt",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption", "col", "colgroup",
+    "ul", "ol", "li", "dl", "dt", "dd",
+    "figure", "figcaption", "abbr", "cite", "q", "address",
+    "font", "center",
+})
+_INBOUND_ATTR_ALLOW = {
+    "a":   {"href", "title", "name"},
+    "img": {"src", "alt", "title", "width", "height"},
+    "td":  {"colspan", "rowspan", "align", "valign"},
+    "th":  {"colspan", "rowspan", "align", "valign"},
+    "table": {"border", "cellpadding", "cellspacing", "width", "align"},
+    "col": {"span", "width", "align"},
+    "colgroup": {"span", "width", "align"},
+}
+# Tags whose entire subtree must be discarded (script bodies, stylesheet
+# rules, server-side includes). With a streaming parser keeping them as
+# text would still let CSS expression() etc. leak through.
+_INBOUND_DROP_TREE = frozenset({"script", "style", "iframe", "object", "embed",
+                                "form", "input", "button", "select", "textarea",
+                                "link", "meta", "base", "noscript"})
+_SAFE_URL_RE = re.compile(r"^\s*(https?:|mailto:|tel:|cid:|data:image/[a-z0-9+.-]+;base64,)", re.I)
+
+
+def _safe_url(value: str) -> str:
+    """Return URL if its scheme is in the safe set, else empty string."""
+    if not isinstance(value, str):
+        return ""
+    if _SAFE_URL_RE.match(value):
+        return value.strip()
+    return ""
+
+
+def _sanitize_inbound_html(raw: str) -> str:
+    """Strip scripts, handlers, and unsafe URLs from sender-supplied HTML.
+    Falls back to escaped plaintext if BeautifulSoup isn't importable, so
+    a missing dep never opens a hole."""
+    if not raw:
+        return ""
+    try:
+        from bs4 import BeautifulSoup
+    except Exception:
+        return html.escape(raw)
+    try:
+        soup = BeautifulSoup(raw, "html.parser")
+    except Exception:
+        return html.escape(raw)
+    # Drop dangerous subtrees entirely.
+    for tag in list(soup.find_all(True)):
+        name = (tag.name or "").lower()
+        if name in _INBOUND_DROP_TREE:
+            tag.decompose()
+    # Walk what's left, dropping disallowed tags (unwrap, keep children)
+    # and scrubbing attributes.
+    for tag in list(soup.find_all(True)):
+        name = (tag.name or "").lower()
+        if name not in _INBOUND_ALLOWED_TAGS:
+            tag.unwrap()
+            continue
+        allowed = _INBOUND_ATTR_ALLOW.get(name, set())
+        for attr in list(tag.attrs.keys()):
+            lowered = attr.lower()
+            if lowered.startswith("on"):
+                # Strip every event handler regardless of tag.
+                del tag.attrs[attr]
+                continue
+            if lowered not in allowed:
+                del tag.attrs[attr]
+                continue
+            if lowered in ("href", "src"):
+                cleaned = _safe_url(tag.attrs.get(attr, ""))
+                if not cleaned:
+                    del tag.attrs[attr]
+                else:
+                    tag.attrs[attr] = cleaned
+        if name == "a" and tag.attrs.get("href"):
+            tag.attrs["rel"] = "noopener noreferrer nofollow"
+            tag.attrs["target"] = "_blank"
+    return str(soup)
+
+
 def _extract_html(msg):
-    """Extract raw HTML body from an email message, if present."""
+    """Extract HTML body from an email message, if present.
+    Returned HTML is sanitized — scripts, event handlers, and unsafe URLs
+    are stripped so a malicious sender can't run JS in the rendered view."""
+    raw = None
     if msg.is_multipart():
         for part in msg.walk():
             ct = part.get_content_type()
@@ -958,13 +1056,16 @@ def _extract_html(msg):
                 payload = part.get_payload(decode=True)
                 if payload:
                     charset = part.get_content_charset() or "utf-8"
-                    return payload.decode(charset, errors="replace")
+                    raw = payload.decode(charset, errors="replace")
+                    break
     elif msg.get_content_type() == "text/html":
         payload = msg.get_payload(decode=True)
         if payload:
             charset = msg.get_content_charset() or "utf-8"
-            return payload.decode(charset, errors="replace")
-    return None
+            raw = payload.decode(charset, errors="replace")
+    if raw is None:
+        return None
+    return _sanitize_inbound_html(raw)
 
 
 def _extract_text(msg):

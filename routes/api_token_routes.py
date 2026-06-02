@@ -54,7 +54,10 @@ def setup_api_token_routes() -> APIRouter:
         owner = get_current_user(request)
 
         raw_token = "ody_" + secrets.token_urlsafe(32)
-        token_hash = bcrypt.hashpw(raw_token.encode(), bcrypt.gensalt()).decode()
+        # Pin cost to 12; the raw token is 256 bits of entropy, so bcrypt
+        # is overkill anyway, but pinning prevents silent regressions if
+        # the library default drifts.
+        token_hash = bcrypt.hashpw(raw_token.encode(), bcrypt.gensalt(rounds=12)).decode()
         token_id = str(uuid.uuid4())[:8]
 
         with get_db_session() as db:

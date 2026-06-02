@@ -396,7 +396,21 @@ def setup_cookbook_routes() -> APIRouter:
     async def model_download(request: Request, req: ModelDownloadRequest):
         """Download a HuggingFace model in a tmux session.
         Uses `hf download` CLI directly — runs in tmux via `script -qc`
-        for real TTY progress, streams ANSI-stripped output via log file."""
+        for real TTY progress, streams ANSI-stripped output via log file.
+
+        Integrity model: file content is verified by HuggingFace Hub
+        itself (LFS SHA-256 against the API, etag/content-length checks
+        for non-LFS files) — both `hf download` and
+        `huggingface_hub.snapshot_download` refuse to keep a file whose
+        recomputed hash doesn't match the manifest. We don't layer an
+        extra checksum on top because (a) it would duplicate what HF is
+        already doing for every byte, and (b) we'd need a trusted
+        external manifest source, which we don't have. The remaining
+        risk is malicious *code* inside a repo (custom loaders, pickle
+        weights). Mitigations belong upstream of this route — prefer
+        safetensors-format models when listing recommendations, and run
+        actual model loading in a separate process where feasible.
+        """
         require_admin(request)
         # Defence-in-depth: even though this endpoint is admin-gated, refuse
         # values that would land in shell contexts with metacharacters.

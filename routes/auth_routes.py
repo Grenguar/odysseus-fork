@@ -6,6 +6,7 @@ from typing import Optional
 import asyncio
 import logging
 import os
+from secrets import compare_digest as _ct_eq
 
 from core.auth import AuthManager
 from src.rate_limiter import RateLimiter
@@ -42,6 +43,12 @@ class LoginRequest(BaseModel):
 class SetupRequest(BaseModel):
     username: str
     password: str
+    # Optional: one-time token printed by setup.py when no admin password
+    # was baked in via env vars (H8). Without this, the original "any
+    # request to /setup wins" race meant whoever hit the URL first owned
+    # the box — fine for desktop dev, dangerous if the port was exposed
+    # before the operator finished provisioning.
+    setup_token: Optional[str] = None
 
 
 class SignupRequest(BaseModel):
@@ -77,12 +84,53 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
     router = APIRouter(prefix="/api/auth", tags=["auth"])
 
     _login_limiter = RateLimiter(max_requests=15, window_seconds=60)
+    # Per-username limiter complements the per-IP one. A botnet that
+    # rotates source IPs slides past _login_limiter; this one keeps
+    # the brute-force ceiling for any single account at 10/min
+    # regardless of source. Username is normalized to lowercase to
+    # match the auth manager.
+    _login_user_limiter = RateLimiter(max_requests=10, window_seconds=60)
     _signup_limiter = RateLimiter(max_requests=3, window_seconds=300)
     _setup_limiter = RateLimiter(max_requests=3, window_seconds=300)
 
     def _get_current_user(request: Request) -> Optional[str]:
         token = request.cookies.get(SESSION_COOKIE)
         return auth_manager.get_username_for_token(token)
+
+    def _setup_token_path() -> str:
+        # core.auth.DEFAULT_AUTH_PATH is data/auth.json — the token sits
+        # next to it.
+        from pathlib import Path
+        from core.auth import DEFAULT_AUTH_PATH
+        return str(Path(DEFAULT_AUTH_PATH).parent / ".setup_token")
+
+    def _consume_setup_token(provided: Optional[str]) -> Optional[str]:
+        """If a token file exists, validate `provided` against it.
+        Returns an error string when validation fails, None on success.
+        When no token file exists this is a permissive desktop-dev install
+        (`pip install` + run, no Docker) — fall through to the original
+        behavior so the operator isn't locked out."""
+        import os as _os
+        from pathlib import Path
+        path = _setup_token_path()
+        if not _os.path.exists(path):
+            return None
+        try:
+            expected = Path(path).read_text(encoding="utf-8").strip()
+        except OSError:
+            return "Setup token file is unreadable — check data/ permissions"
+        if not expected:
+            return "Setup token file is empty — regenerate via setup.py"
+        if not provided or not _ct_eq(provided.strip(), expected):
+            return "Invalid setup token. Find it in the setup.py output or in data/.setup_token."
+        # One-shot: delete the file before completing setup so a replay
+        # can't claim a second admin (the is_configured check below would
+        # also stop that, but defense-in-depth).
+        try:
+            _os.unlink(path)
+        except OSError:
+            pass
+        return None
 
     @router.post("/setup")
     async def first_run_setup(body: SetupRequest, request: Request):
@@ -93,6 +141,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             raise HTTPException(400, "Already configured")
         if len(body.password) < 8:
             raise HTTPException(400, "Password must be at least 8 characters")
+        token_err = _consume_setup_token(body.setup_token)
+        if token_err:
+            raise HTTPException(403, token_err)
         ok = await asyncio.to_thread(auth_manager.setup, body.username, body.password)
         if not ok:
             raise HTTPException(500, "Setup failed")
@@ -120,8 +171,13 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
     async def login(body: LoginRequest, request: Request, response: Response):
         if not _login_limiter.check(request.client.host):
             raise HTTPException(429, "Too many requests — try again later")
-        # Verify password first
         username = body.username.strip().lower()
+        # Per-username throttle. Deliberately checked BEFORE the password
+        # verify so a botnet hitting the same account from many IPs
+        # can't spam bcrypt either. Returns the same 429 message as the
+        # per-IP path to avoid revealing which limit was hit.
+        if username and not _login_user_limiter.check(f"u:{username}"):
+            raise HTTPException(429, "Too many requests — try again later")
         if not await asyncio.to_thread(auth_manager.verify_password, username, body.password):
             raise HTTPException(401, "Invalid credentials")
         # Check 2FA if enabled
@@ -161,6 +217,10 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         token = request.cookies.get(SESSION_COOKIE)
         result = auth_manager.status(token)
         result["signup_enabled"] = auth_manager.signup_enabled
+        # H8: surface whether first-run setup requires a token, so the
+        # /setup page can show the input instead of failing with 403.
+        if not result.get("configured"):
+            result["setup_token_required"] = os.path.exists(_setup_token_path())
         # Include the caller's effective privileges so the frontend can
         # hide / dim UI controls the user isn't allowed to use. Admins get
         # ADMIN_PRIVILEGES (everything on), regular users get their stored
@@ -222,7 +282,9 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
             raise HTTPException(401, "Not authenticated")
         if not auth_manager.totp_confirm_enable(user, body.code):
             raise HTTPException(400, "Invalid code — try again")
-        backup = auth_manager.users.get(user, {}).get("totp_backup_codes", [])
+        # Stored backup codes are bcrypt hashes; the cleartext list is
+        # only available once, immediately after enable, via this call.
+        backup = auth_manager.consume_pending_backup_codes(user)
         return {"ok": True, "backup_codes": backup}
 
     class TotpDisableRequest(BaseModel):

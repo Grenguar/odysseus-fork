@@ -19,6 +19,55 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 
 
+# Canonical root for MCP OAuth credentials written by add_server. Pinned
+# to data/mcp_oauth so an admin-supplied `dir` field can't escape into
+# the repo root or system locations. Created lazily on first write.
+_MCP_OAUTH_ROOT = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data", "mcp_oauth",
+)
+
+
+def _safe_oauth_path(raw_dir: str, raw_filename: str):
+    """Resolve raw admin-supplied dir+filename to a path inside the
+    canonical MCP OAuth root. Returns (filepath, dirpath) or None if
+    the inputs are unusable.
+
+    Behavior:
+      * Anchor the writes under data/mcp_oauth regardless of what
+        `raw_dir` says — the field is reduced to a subdir hint, never
+        an absolute escape route.
+      * Strip the filename to its basename and reject names that don't
+        end in .json.
+      * Reject any post-normalization path that resolves outside the
+        anchor (belt-and-braces TOCTOU defense).
+    """
+    if not raw_filename:
+        return None
+    from pathlib import Path
+    # The dir hint is allowed as a *relative subdir* under the anchor;
+    # absolute paths, ~, or .. components collapse to the anchor itself.
+    hint = (raw_dir or "").strip()
+    if hint:
+        hint = os.path.basename(os.path.normpath(hint.replace("\\", "/").strip("/")))
+    dirpath = os.path.join(_MCP_OAUTH_ROOT, hint) if hint else _MCP_OAUTH_ROOT
+    # secure_filename mirrors upload_handler.py — drops path separators,
+    # dotfiles, and weird unicode. We force the extension to .json.
+    from src.upload_handler import secure_filename
+    fname = secure_filename(raw_filename)
+    if not fname or not fname.lower().endswith(".json"):
+        return None
+    filepath = os.path.normpath(os.path.join(dirpath, fname))
+    anchor = os.path.normpath(_MCP_OAUTH_ROOT)
+    try:
+        # Path.is_relative_to is 3.9+; commonpath works everywhere.
+        if os.path.commonpath([os.path.abspath(filepath), os.path.abspath(anchor)]) != os.path.abspath(anchor):
+            return None
+    except ValueError:
+        return None
+    return filepath, os.path.dirname(filepath)
+
+
 def _load_disabled_map():
     """Load per-server disabled tool sets from DB."""
     db = SessionLocal()
@@ -125,11 +174,19 @@ def setup_mcp_routes(mcp_manager: McpManager):
         if oauth_file:
             try:
                 oauth_data = json.loads(oauth_file)
-                oauth_dir = os.path.expanduser(oauth_data.get("dir", ""))
-                oauth_filename = oauth_data.get("filename", "")
+                oauth_dir_raw = oauth_data.get("dir", "")
+                oauth_filename_raw = oauth_data.get("filename", "")
                 client_id = oauth_data.get("client_id", "")
                 client_secret = oauth_data.get("client_secret", "")
-                if oauth_dir and oauth_filename and client_id and client_secret:
+                # M-fix: previously oauth_dir / oauth_filename were taken
+                # verbatim from the admin-supplied payload. A request with
+                # `dir="../../"` and `filename="config.json"` could
+                # overwrite repo-root files. Constrain both to the
+                # canonical MCP credentials directory under data/ and
+                # sanitize the filename.
+                safe_path = _safe_oauth_path(oauth_dir_raw, oauth_filename_raw)
+                if safe_path and client_id and client_secret:
+                    filepath, oauth_dir = safe_path
                     os.makedirs(oauth_dir, exist_ok=True)
                     creds = {
                         "installed": {
@@ -140,12 +197,24 @@ def setup_mcp_routes(mcp_manager: McpManager):
                             "token_uri": "https://accounts.google.com/o/oauth2/token",
                         }
                     }
-                    filepath = os.path.join(oauth_dir, oauth_filename)
                     with open(filepath, "w", encoding="utf-8") as f:
                         json.dump(creds, f, indent=2)
+                    # Lock the credential file (POSIX). safe_chmod is a
+                    # no-op on Windows; user-profile ACLs cover us there.
+                    try:
+                        from core.platform_compat import safe_chmod
+                        safe_chmod(filepath, 0o600)
+                    except Exception:
+                        pass
                     logger.info(f"Wrote OAuth credentials to {filepath}")
                     parsed_env.pop("GOOGLE_CLIENT_ID", None)
                     parsed_env.pop("GOOGLE_CLIENT_SECRET", None)
+                else:
+                    logger.warning(
+                        "Refused OAuth file write: invalid dir/filename combination "
+                        "(dir=%r, filename=%r)",
+                        oauth_dir_raw, oauth_filename_raw,
+                    )
             except (json.JSONDecodeError, OSError) as e:
                 logger.warning(f"Failed to write OAuth file: {e}")
 

@@ -298,6 +298,22 @@ def setup_task_routes(task_scheduler) -> APIRouter:
     # API. See review CRIT-C.
     _ADMIN_ONLY_ACTIONS = {"run_local", "run_script", "ssh_command"}
 
+    def _is_internal_tool_request(request: Request) -> bool:
+        """True when the request entered through the in-process agent
+        loopback path (X-Odysseus-Internal-Token). The agent runs with
+        admin-equivalent privileges by design, but H5 carves out the
+        shell/SSH actions: those must be created by a human admin via
+        the UI, not by an LLM that could be prompt-injected into
+        scheduling arbitrary commands."""
+        return bool(getattr(getattr(request, "state", None), "is_internal_tool", False))
+
+    _AGENT_RUN_BLOCK_MSG = (
+        "This action runs arbitrary shell commands and must be created "
+        "by a human admin from the Tasks UI, not by the agent. If you want "
+        "the agent to suggest a command, ask it to draft one and approve it "
+        "yourself."
+    )
+
     def _is_admin(user: str | None) -> bool:
         if not user:
             return False
@@ -328,8 +344,11 @@ def setup_task_routes(task_scheduler) -> APIRouter:
         # Block shell-executing action types for non-admins. action_run_local
         # uses subprocess.run(shell=True) and ssh_command / run_script run
         # arbitrary commands.
-        if req.task_type == "action" and req.action in _ADMIN_ONLY_ACTIONS and not _is_admin(user):
-            raise HTTPException(403, f"Action '{req.action}' requires admin privileges")
+        if req.task_type == "action" and req.action in _ADMIN_ONLY_ACTIONS:
+            if _is_internal_tool_request(request):
+                raise HTTPException(403, _AGENT_RUN_BLOCK_MSG)
+            if not _is_admin(user):
+                raise HTTPException(403, f"Action '{req.action}' requires admin privileges")
         if req.trigger_type == "schedule" and not req.schedule:
             raise HTTPException(400, "Schedule is required for schedule-triggered tasks")
         if req.trigger_type == "schedule" and req.schedule == "cron" and not req.cron_expression:
@@ -532,9 +551,12 @@ def setup_task_routes(task_scheduler) -> APIRouter:
             if req.task_type is not None:
                 task.task_type = req.task_type
             if req.action is not None:
-                # Same admin-only gate as create — see CRIT-C.
-                if req.action in _ADMIN_ONLY_ACTIONS and not _is_admin(user):
-                    raise HTTPException(403, f"Action '{req.action}' requires admin privileges")
+                # Same admin-only gate as create — see CRIT-C / H5.
+                if req.action in _ADMIN_ONLY_ACTIONS:
+                    if _is_internal_tool_request(request):
+                        raise HTTPException(403, _AGENT_RUN_BLOCK_MSG)
+                    if not _is_admin(user):
+                        raise HTTPException(403, f"Action '{req.action}' requires admin privileges")
                 task.action = req.action
             if req.output_target is not None:
                 task.output_target = req.output_target
@@ -704,6 +726,11 @@ def setup_task_routes(task_scheduler) -> APIRouter:
                 raise HTTPException(404, "Task not found")
             if user and task.owner != user:
                 raise HTTPException(403, "Access denied")
+            # H5: even if a real admin previously created a run_* task, the
+            # agent shouldn't be able to fire it on demand. Manual trigger
+            # of shell-executing tasks must come from a human session.
+            if task.action in _ADMIN_ONLY_ACTIONS and _is_internal_tool_request(request):
+                raise HTTPException(403, _AGENT_RUN_BLOCK_MSG)
         finally:
             db.close()
         started = await task_scheduler.run_task_now(task_id, force=force)
@@ -850,10 +877,14 @@ def setup_task_routes(task_scheduler) -> APIRouter:
         """List available built-in actions."""
         user = _owner(request)
         from src.builtin_actions import BUILTIN_ACTION_INFO
+        # Hide run_* from the agent's view of the action catalog so it
+        # doesn't try to plan a task it can't create. Real admins still
+        # see the full list from the UI.
+        agent_view = _is_internal_tool_request(request)
         return {"actions": [
             {"name": name, "description": desc}
             for name, desc in BUILTIN_ACTION_INFO.items()
-            if name not in _ADMIN_ONLY_ACTIONS or _is_admin(user)
+            if name not in _ADMIN_ONLY_ACTIONS or (not agent_view and _is_admin(user))
         ]}
 
     @router.get("/meta/events")

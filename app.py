@@ -18,6 +18,22 @@ def register_static_mime_types() -> None:
 
 register_static_mime_types()
 
+
+def _cap_pillow_image_pixels() -> None:
+    """Bound PIL.Image.MAX_IMAGE_PIXELS so a hostile JPEG/PNG header that
+    claims 100k × 100k pixels can't OOM the process when something
+    (vision pipeline, thumbnailer, gallery preview) calls .load() or
+    .thumbnail(). 64 MP is comfortably above any consumer camera and
+    far below the gigapixels needed to consume meaningful RAM."""
+    try:
+        from PIL import Image
+    except Exception:
+        return
+    Image.MAX_IMAGE_PIXELS = 64 * 1024 * 1024
+
+
+_cap_pillow_image_pixels()
+
 # Windows: force HuggingFace/fastembed to COPY model files instead of symlinking.
 # On a network-share/UNC data dir Windows can't follow HF's symlinks ([WinError
 # 1463]), so the ONNX embedding model fails to load. huggingface_hub reads this
@@ -54,7 +70,7 @@ from core.constants import (
     REQUEST_TIMEOUT, OPENAI_API_KEY,
 )
 from core.database import SessionLocal, ApiToken
-from core.middleware import SecurityHeadersMiddleware
+from core.middleware import SecurityHeadersMiddleware, SameOriginCsrfMiddleware
 from core.auth import AuthManager
 from core.exceptions import (
     SessionNotFoundError, InvalidFileUploadError,
@@ -71,6 +87,12 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
+# Mount the secret-scrubbing filter on the root logger so every handler
+# (uvicorn console, file handlers added by operators, syslog forwarders)
+# gets masked output for Bearer tokens, sk-/hf_/ody_ keys, password=...
+# in URIs, etc. See src/log_scrub.py for the pattern list.
+from src.log_scrub import install_root_filter
+install_root_filter()
 logger = logging.getLogger(__name__)
 
 # ========= APP =========
@@ -102,6 +124,13 @@ app.add_middleware(
 
 # ========= SECURITY HEADERS MIDDLEWARE =========
 app.add_middleware(SecurityHeadersMiddleware)
+
+# ========= CSRF (ORIGIN-CHECK) MIDDLEWARE =========
+# Added after the auth middleware in registration order so it runs BEFORE
+# auth on inbound requests (Starlette applies middleware in reverse-add
+# order). The check is a no-op for safe methods, bearer-token callers,
+# the internal-tool loopback, and the auth-exempt paths.
+app.add_middleware(SameOriginCsrfMiddleware)
 
 
 # ========= REQUEST TIMEOUT (FALLBACK FOR HUNG HANDLERS) =========
@@ -270,6 +299,12 @@ if AUTH_ENABLED:
                     else:
                         request.state.current_user = "internal-tool"
                     request.state.api_token = False
+                    # H5: surface a stable flag so high-risk routes (run_local,
+                    # run_script, ssh_command) can refuse agent-originated calls
+                    # even when the agent is impersonating an admin. The flag
+                    # is independent of current_user (which may be the admin
+                    # the agent acts on behalf of).
+                    request.state.is_internal_tool = True
                     return await call_next(request)
             except Exception:
                 pass
