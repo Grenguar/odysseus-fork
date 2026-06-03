@@ -3241,14 +3241,23 @@ body.hamburger-right .sidebar .sidebar-header {
   justify-content: flex-end !important;
 }
 
-/* ---- 37.2 Welcome state — keep input near bottom, not floating ----
-   style.css line ~1880 sets `.chat-container.welcome-active .chat-input-bar
-   { margin-bottom: 30vh }` which pushes the input up and leaves a huge
-   empty band below it. ChatGPT centers welcome copy near the top and
-   keeps the input docked. Mirror that. */
+/* ---- 37.2 Welcome state — input at vertical ~60-70%, not flush bottom ----
+   style.css's `.chat-container.welcome-active .chat-input-bar
+   { margin-bottom: 30vh }` pushed too high (huge empty band below).
+   My previous override `margin-bottom: 0` pushed too low (overflowed
+   the viewport by ~8px). Sweet spot mirrors ChatGPT: input near the
+   vertical center on welcome, breathing room above + below. */
 .chat-container.welcome-active .chat-input-bar {
-  margin-bottom: 0 !important;
-  margin-top: auto !important; /* fall to the bottom of the flex column */
+  margin-bottom: 12vh !important;       /* keeps input ~60-70% from top */
+  margin-top: auto !important;          /* sit at the bottom of welcome flex */
+  padding-bottom: 8px !important;
+}
+
+/* In active chat state, the bar sits at the very bottom of the
+   transcript area; give it a small breathing margin so it never
+   overflows the viewport on borderline heights. */
+.chat-container:not(.welcome-active) .chat-input-bar {
+  margin-bottom: 16px !important;
 }
 
 /* Welcome screen — push toward the upper-middle (40% from top), with
