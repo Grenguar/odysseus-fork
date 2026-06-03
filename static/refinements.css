@@ -2508,3 +2508,141 @@ pre .code-toolbar {
     border-color: rgba(0,0,0,0.08) !important;
   }
 }
+
+/* ============================================================
+   §34. ChatGPT-style simplification (≤768px)
+   The bottom toolbar with rag/research/group/character/compare ×
+   indicators + Agent/Chat segmented control looks noisy and is
+   not what mobile users expect. ChatGPT's mobile pattern:
+     [+]   [input pill ... mic | send]
+   That's it. All advanced toggles live behind the `+` menu.
+   We achieve that purely in CSS by:
+     • Hiding every .input-icon-btn EXCEPT .overflow-wrapper
+     • Hiding the .mode-toggle (Agent/Chat) entirely
+     • Restyling .overflow-wrapper's button as a clean round "+"
+     • Letting the existing overflow JS open the tool menu
+   ============================================================ */
+@media (max-width: 768px) {
+
+  /* Hide every tool indicator/toggle on the bottom row */
+  .chat-input-bar .chat-input-left > #web-toggle-btn,
+  .chat-input-bar .chat-input-left > #bash-toggle-btn,
+  .chat-input-bar .chat-input-left > #rag-indicator-btn,
+  .chat-input-bar .chat-input-left > #research-toggle-btn,
+  .chat-input-bar .chat-input-left > #group-toggle-btn,
+  .chat-input-bar .chat-input-left > #character-indicator-btn,
+  .chat-input-bar .chat-input-left > #compare-indicator-btn,
+  .chat-input-bar .chat-input-left > .input-icon-btn:not(.overflow-trigger):not(.overflow-toggle) {
+    display: none !important;
+  }
+
+  /* Hide the Agent / Chat segmented control on mobile */
+  .chat-input-bar .mode-toggle,
+  .chat-input-bar .chat-input-right .mode-toggle,
+  .chat-input-bar .chat-input-right > .mode-toggle {
+    display: none !important;
+  }
+
+  /* Keep the overflow wrapper visible — it's the only tool-trigger */
+  .chat-input-bar .chat-input-left .overflow-wrapper {
+    display: inline-flex !important;
+    margin: 0 !important;
+  }
+
+  /* Hide the chevron / inner content of the overflow trigger and
+     overlay a clean "+" glyph via pseudo-element. We keep the SVG
+     in DOM (so JS click handlers still fire) but render it invisibly. */
+  .chat-input-bar .overflow-wrapper > button,
+  .chat-input-bar .overflow-wrapper button {
+    position: relative !important;
+    width: 38px !important;
+    height: 38px !important;
+    min-width: 38px !important;
+    border-radius: 50% !important;
+    background: color-mix(in srgb, var(--fg) 5%, var(--panel)) !important;
+    border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent) !important;
+    color: var(--fg) !important;
+    padding: 0 !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04) !important;
+    overflow: hidden;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .chat-input-bar .overflow-wrapper > button > *,
+  .chat-input-bar .overflow-wrapper > button svg,
+  .chat-input-bar .overflow-wrapper > button span,
+  .chat-input-bar .overflow-wrapper > button .label {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    height: 0 !important;
+    position: absolute !important;
+  }
+
+  .chat-input-bar .overflow-wrapper > button::before {
+    content: "+" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-family: var(--font-family-ui) !important;
+    font-size: 24px !important;
+    font-weight: 300 !important;
+    line-height: 1 !important;
+    color: var(--fg) !important;
+    pointer-events: none;
+  }
+
+  .chat-input-bar .overflow-wrapper > button:hover,
+  .chat-input-bar .overflow-wrapper > button:active {
+    background: color-mix(in srgb, var(--fg) 10%, var(--panel)) !important;
+  }
+
+  /* Now the .chat-input-bottom contains just: [+] (left) + [send] (right).
+     Tighten the row and give it more vertical breathing room so the
+     two buttons feel intentional, not cramped against the input pill. */
+  .chat-input-bar .chat-input-bottom {
+    padding: 4px 0 !important;
+    min-height: 44px !important;
+    justify-content: space-between !important;
+  }
+
+  /* Ensure send button stays at the far right with a comfortable size */
+  .chat-input-bar .chat-input-right {
+    display: flex !important;
+    align-items: center !important;
+    gap: 0 !important;
+    margin-left: auto !important;
+  }
+  .chat-input-bar .send-btn {
+    width: 38px !important;
+    height: 38px !important;
+    min-width: 38px !important;
+  }
+
+  /* Hide ghost-text overlay if it bleeds — sometimes shows abbreviated
+     placeholder ("C..." in screenshot) in the wrong place */
+  .chat-input-bar #message-ghost,
+  .chat-input-bar .ghost-text-overlay {
+    pointer-events: none;
+    /* keep it for JS but make it invisible if it overlaps the pill chrome */
+    color: transparent !important;
+  }
+
+  /* The model picker showed an abbreviated "C..." at the top-right
+     of the pill, overlapping the textarea text. Make it stay quiet
+     and small, or hide on very narrow screens. */
+  .chat-input-bar .chat-input-top .model-picker-wrap {
+    flex-shrink: 1;
+    max-width: 90px;
+  }
+  .chat-input-bar .chat-input-top .model-picker-btn {
+    font-size: 11.5px !important;
+    padding: 4px 6px !important;
+    max-width: 84px;
+    color: color-mix(in srgb, var(--fg) 55%, transparent) !important;
+  }
+}
