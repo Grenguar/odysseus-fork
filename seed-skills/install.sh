@@ -46,19 +46,29 @@ fi
 
 for user in "$@"; do
   for src in "${seed_skills[@]}"; do
-    skill_name="$(basename "$(dirname "$src")")"
+    base_name="$(basename "$(dirname "$src")")"
+    # Skills are owner-scoped via frontmatter but stored at a flat path
+    # keyed by the `name:` slug. Two users sharing one slug collide on
+    # disk (the second install would overwrite the first). Per-user
+    # naming keeps both copies, both visible only to their owner.
+    per_user_name="${base_name}-${user}"
     # Read the category from the frontmatter; default to general.
     category="$(awk '/^category:/ {print $2; exit}' "$src" 2>/dev/null || true)"
     category="${category:-general}"
-    dest_dir="$SKILLS_ROOT/$category/$skill_name"
+    dest_dir="$SKILLS_ROOT/$category/$per_user_name"
     dest="$dest_dir/SKILL.md"
     mkdir -p "$dest_dir"
-    # Swap the placeholder owner. Use a tmp file + atomic rename so a
-    # concurrent loader never sees a half-written SKILL.md.
+    # Atomic write — sed into a tmp file in the destination dir, then
+    # rename onto the target so a concurrent loader never sees a
+    # half-written SKILL.md. Swap BOTH the placeholder owner and the
+    # `name:` slug so the loader keys the file correctly.
     tmp="$dest.tmp.$$"
-    sed "s/^owner: REPLACE_WITH_YOUR_USERNAME$/owner: $user/" "$src" > "$tmp"
+    sed \
+      -e "s/^owner: REPLACE_WITH_YOUR_USERNAME$/owner: $user/" \
+      -e "s/^name: ${base_name}$/name: ${per_user_name}/" \
+      "$src" > "$tmp"
     mv -f "$tmp" "$dest"
-    echo "installed: $category/$skill_name → owner=$user"
+    echo "installed: $category/$per_user_name → owner=$user"
   done
 done
 
