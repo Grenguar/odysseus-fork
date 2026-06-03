@@ -28,6 +28,17 @@ export const THEMES = {
                             inputBg: '#2f2f2f' } },
   claude:     { bg:'#262624', fg:'#f5f4f0', panel:'#30302e', border:'#4a4a47', red:'#c6613f' },
   cute:       { bg:'#fff0f5', fg:'#d4608a', panel:'#fff8fa', border:'#f0c0d0', red:'#ff6b9d' },
+  // Refined modern theme — Claude/ChatGPT inspired warm neutrals with subtle borders.
+  aurora:     { bg:'#1c1b1a', fg:'#ecebe6', panel:'#252422', border:'#3a3936', red:'#d97757',
+                advanced: { sendBtnBg:'#d97757', sendBtnHover:'#bf6644',
+                            userBubbleBg:'#2f2d2b', aiBubbleBg:'#252422',
+                            inputBg:'#2a2826', sidebarBg:'#1a1918',
+                            bubbleBorder:'#34322f' } },
+  'aurora-light': { bg:'#faf9f7', fg:'#2b2a28', panel:'#ffffff', border:'#e6e3dd', red:'#c45a3a',
+                advanced: { sendBtnBg:'#c45a3a', sendBtnHover:'#a84a2e',
+                            userBubbleBg:'#f1efea', aiBubbleBg:'#ffffff',
+                            inputBg:'#f7f5f1', sidebarBg:'#f4f2ec',
+                            bubbleBorder:'#e6e3dd' } },
 };
 
 const DEFAULT_THEME = 'dark';
@@ -38,6 +49,8 @@ const FONT_MAP = {
   mono: "'Fira Code', monospace",
   sans: "system-ui, -apple-system, 'Segoe UI', sans-serif",
   serif: "Georgia, 'Times New Roman', serif",
+  // Modern UI stack — Inter loaded via @font-face in style.css with system fallbacks.
+  inter: "'Inter', 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
 };
 const DEFAULT_FONT = 'mono';
 const DEFAULT_DENSITY = 'comfortable';
@@ -77,6 +90,14 @@ const THEME_DEFAULT_INTENSITY = {
 // Default frosted-glass state per theme. Themes not listed default to false.
 const THEME_DEFAULT_FROSTED = {
   lavender:   true,
+};
+
+// Default font per theme — themes not listed fall back to DEFAULT_FONT.
+const THEME_DEFAULT_FONT = {
+  aurora:         'inter',
+  'aurora-light': 'inter',
+  gpt:            'inter',
+  claude:         'inter',
 };
 
 // ── Custom theme persistence ──
@@ -629,7 +650,7 @@ export function initThemeUI() {
         <span style="background:${c.fg}"></span>
         <span style="background:${c.red}"></span>
       </div>
-      ${name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : name)}
+      ${name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : name.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))}
     </div>
   `).join('');
 
@@ -691,7 +712,7 @@ export function initThemeUI() {
         sw.classList.add('active');
         syncPickers(colors);
         const ct = sw.dataset.custom ? customThemes[name] : null;
-        const f = ct && ct.font ? ct.font : DEFAULT_FONT;
+        const f = ct && ct.font ? ct.font : (THEME_DEFAULT_FONT[name] || DEFAULT_FONT);
         const d = ct && ct.density ? ct.density : DEFAULT_DENSITY;
         const p = ct && ct.bgPattern ? ct.bgPattern : (THEME_DEFAULT_PATTERN[name] || 'none');
         const ec = ct && ct.bgEffectColor ? ct.bgEffectColor : (THEME_DEFAULT_EFFECT_COLOR[name] || '');
