@@ -2665,6 +2665,21 @@ pre .code-toolbar {
   display: none !important;
 }
 
+/* Hide the inline tool-indicator pills (RAG ×, Web ×, Research ×, etc.)
+   on ALL viewports. They're managed through the + overflow menu and
+   the inline "RAG ×" treatment looks awkward. The actual toggle still
+   lives in the DOM so JS can manage state. */
+.chat-input-bar .chat-input-left > #web-toggle-btn,
+.chat-input-bar .chat-input-left > #bash-toggle-btn,
+.chat-input-bar .chat-input-left > #rag-indicator-btn,
+.chat-input-bar .chat-input-left > #research-toggle-btn,
+.chat-input-bar .chat-input-left > #group-toggle-btn,
+.chat-input-bar .chat-input-left > #character-indicator-btn,
+.chat-input-bar .chat-input-left > #compare-indicator-btn,
+.chat-input-bar .input-icon-btn.tool-indicator {
+  display: none !important;
+}
+
 /* ---- 35.1 Sidebar header / brand — quieter, ChatGPT-like ---- */
 .sidebar .sidebar-header {
   padding: 12px 14px 10px !important;
