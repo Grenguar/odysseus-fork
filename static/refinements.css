@@ -3288,4 +3288,84 @@ body.hamburger-right .sidebar .sidebar-header {
 .chat-input-bar {
   flex-shrink: 0;
 }
+
+/* ============================================================
+   §38. Overflow menu (the popup from the + button)
+   User feedback: "going to the right quite a lot" — items get
+   clipped by the right viewport edge. Widen and clamp.
+   ============================================================ */
+.overflow-menu {
+  min-width: 220px !important;
+  max-width: min(280px, 92vw) !important;
+  background: var(--panel) !important;
+  border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.18) !important;
+  padding: 6px !important;
+  /* Anchor to the right edge of the + button so it grows leftward,
+     never off-screen. JS sets `top`/`left` inline; we override via
+     transform to keep it inside the viewport. */
+  transform: translateX(calc(-100% + 38px)) !important;
+}
+
+.overflow-menu-item {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 10px 12px !important;
+  border-radius: 8px !important;
+  font-family: var(--font-family-ui) !important;
+  font-size: 13.5px !important;
+  font-weight: 450 !important;
+  color: var(--fg) !important;
+  background: transparent !important;
+  border: none !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 36px !important;
+  text-align: left !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.overflow-menu-item:hover,
+.overflow-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--fg) 8%, transparent) !important;
+}
+
+.overflow-menu-item svg {
+  width: 18px !important;
+  height: 18px !important;
+  flex-shrink: 0 !important;
+  opacity: 0.85;
+}
+
+/* Active toggles (e.g., web search ON) get a subtle accent */
+.overflow-menu-item.active,
+.overflow-menu-item[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--red) 12%, transparent) !important;
+  color: var(--fg) !important;
+}
+.overflow-menu-item.active svg {
+  opacity: 1;
+  color: var(--red) !important;
+}
+
+/* Mobile: full-width-ish, anchored from the right but allow shrink */
+@media (max-width: 768px) {
+  .overflow-menu {
+    min-width: 240px !important;
+    max-width: 92vw !important;
+    /* On mobile the + button is on the LEFT, so menu grows rightward */
+    transform: translateX(0) !important;
+  }
+  .overflow-menu-item {
+    font-size: 14.5px !important;
+    min-height: 44px !important;
+    padding: 12px 14px !important;
+  }
+}
 }
