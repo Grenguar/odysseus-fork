@@ -2646,3 +2646,260 @@ pre .code-toolbar {
     color: color-mix(in srgb, var(--fg) 55%, transparent) !important;
   }
 }
+
+/* ============================================================
+   §35. Global polish — hide Agent/Chat toggle everywhere,
+   refine desktop sidebar to ChatGPT-style.
+   User feedback: "chat/agent toggle is horrible" — kill it.
+   Sidebar feedback: needs ChatGPT-like quiet section headers,
+   neutral colors, plain-text rows with subtle hover.
+   ============================================================ */
+
+/* Hide the Agent/Chat segmented control on ALL viewports.
+   Mode switching (if needed) lives behind the model picker / slash
+   commands now. */
+.chat-input-bar .mode-toggle,
+.chat-input-bar .mode-toggle.mode-chat,
+.chat-input-bar .mode-toggle.mode-agent,
+.chat-input-bar .chat-input-right > .mode-toggle {
+  display: none !important;
+}
+
+/* ---- 35.1 Sidebar header / brand — quieter, ChatGPT-like ---- */
+.sidebar .sidebar-header {
+  padding: 12px 14px 10px !important;
+  min-height: 52px !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar .sidebar-brand-title {
+  font-family: var(--font-family-ui) !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+  /* Use neutral fg, not brand red — quiet like "ChatGPT" wordmark */
+  color: var(--fg) !important;
+  opacity: 0.95 !important;
+  left: 0 !important;
+}
+
+/* ---- 35.2 Section headers — sentence case, neutral, ChatGPT-style ---- */
+.sidebar .section-header-flex {
+  padding: 4px 10px !important;
+  margin-top: 12px !important;
+  align-items: center;
+}
+
+.sidebar .section-title {
+  font-family: var(--font-family-ui) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  text-transform: none !important;  /* was UPPERCASE */
+  letter-spacing: 0 !important;
+  color: color-mix(in srgb, var(--fg) 55%, transparent) !important;
+  padding: 0 !important;
+}
+
+/* Capitalize first letter only (sentence-case for "Chats", "Email", "Tools", "Models") */
+.sidebar .section-title::first-letter {
+  text-transform: uppercase;
+}
+
+/* Section icons (the little colored emojis/SVGs prefix) — make neutral */
+.sidebar .section-title svg,
+.sidebar .section-title .section-icon {
+  color: color-mix(in srgb, var(--fg) 55%, transparent) !important;
+  opacity: 0.9;
+}
+
+/* Hide the "+" buttons next to section headers on desktop — keep on hover only */
+.sidebar .section-header-flex .section-header-btn,
+.sidebar .section-header-flex .list-item-plus-btn {
+  opacity: 0 !important;
+  transition: opacity 0.15s ease;
+  background: transparent !important;
+  border: none !important;
+  color: color-mix(in srgb, var(--fg) 60%, transparent) !important;
+  width: 24px;
+  height: 24px;
+}
+.sidebar .section-header-flex:hover .section-header-btn,
+.sidebar .section-header-flex:hover .list-item-plus-btn,
+.sidebar .section:hover .section-header-btn,
+.sidebar .section:hover .list-item-plus-btn {
+  opacity: 1 !important;
+}
+
+/* Section collapse chevron — quieter */
+.sidebar .section-collapse-btn {
+  background: transparent !important;
+  border: none !important;
+  color: color-mix(in srgb, var(--fg) 45%, transparent) !important;
+  width: 24px !important;
+  height: 24px !important;
+  padding: 0 !important;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.sidebar .section:hover .section-collapse-btn {
+  opacity: 0.7;
+}
+
+/* ---- 35.3 List items — plain text, ChatGPT-style ---- */
+.sidebar .list-item {
+  font-family: var(--font-family-ui) !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  line-height: 1.35 !important;
+  padding: 9px 10px !important;
+  margin: 1px 4px !important;
+  border-radius: 8px !important;
+  color: var(--fg) !important;
+  opacity: 0.92;
+  background: transparent !important;
+  border: none !important;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: background 0.1s ease, opacity 0.1s ease !important;
+}
+
+.sidebar .list-item:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent) !important;
+  opacity: 1;
+}
+
+.sidebar .list-item.active,
+.sidebar .list-item[aria-current="true"],
+.sidebar .list-item.is-active {
+  background: color-mix(in srgb, var(--fg) 11%, transparent) !important;
+  font-weight: 500 !important;
+  opacity: 1;
+}
+
+/* Icons inside list items — neutral, sized */
+.sidebar .list-item svg,
+.sidebar .list-item > svg {
+  width: 18px !important;
+  height: 18px !important;
+  color: color-mix(in srgb, var(--fg) 80%, transparent) !important;
+  stroke: currentColor !important;
+  fill: none;
+  flex-shrink: 0;
+}
+
+.sidebar .list-item span.grow {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* New Chat — make it stand out slightly (subtle, not loud) */
+.sidebar #sidebar-new-chat-btn.list-item {
+  font-weight: 500 !important;
+}
+.sidebar #sidebar-new-chat-btn.list-item svg {
+  color: var(--fg) !important;
+}
+
+/* ---- 35.4 User bar footer — like ChatGPT account pill ---- */
+.sidebar .sidebar-user-bar {
+  border-top: 1px solid color-mix(in srgb, var(--fg) 8%, transparent) !important;
+  padding: 10px 12px !important;
+  margin: 0;
+  gap: 8px;
+}
+
+.sidebar .user-bar-left {
+  padding: 6px 8px !important;
+  border-radius: 8px !important;
+  gap: 10px;
+}
+.sidebar .user-bar-left:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent) !important;
+}
+
+.sidebar .user-bar-avatar {
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 50% !important;
+  background: color-mix(in srgb, var(--red) 85%, var(--fg)) !important;
+  color: var(--bg) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  opacity: 1 !important;
+}
+
+.sidebar .user-bar-name {
+  font-family: var(--font-family-ui) !important;
+  font-size: 13.5px !important;
+  font-weight: 500 !important;
+  color: var(--fg) !important;
+  opacity: 0.85 !important;
+}
+
+.sidebar .user-bar-btn {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 8px !important;
+  opacity: 0.55 !important;
+}
+.sidebar .user-bar-btn:hover {
+  opacity: 1 !important;
+}
+
+/* ---- 35.5 Session list items (recent chats) ---- */
+.sidebar #session-list .list-item,
+.sidebar #session-list > * {
+  font-size: 14px !important;
+  padding: 8px 10px !important;
+  margin: 1px 4px !important;
+  border-radius: 8px !important;
+  color: var(--fg) !important;
+  opacity: 0.88;
+}
+
+/* ---- 35.6 Models panel — quieter typography ---- */
+.sidebar #models-section .model-search-input {
+  background: color-mix(in srgb, var(--fg) 5%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--fg) 8%, transparent) !important;
+  border-radius: 8px !important;
+  font-size: 13px !important;
+  padding: 7px 10px !important;
+  margin: 4px;
+  width: calc(100% - 8px);
+}
+
+/* ---- 35.7 Sidebar resize handle — invisible until hover ---- */
+.sidebar .sidebar-resize-handle {
+  background: transparent !important;
+  transition: background 0.15s ease;
+}
+.sidebar .sidebar-resize-handle:hover {
+  background: color-mix(in srgb, var(--red) 40%, transparent) !important;
+}
+
+/* ---- 35.8 Mobile-specific overrides keep their existing styling ---- */
+@media (max-width: 768px) {
+  .sidebar .section-title {
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    text-transform: none !important;
+    color: var(--fg) !important;
+    padding: 16px 12px 6px !important;
+  }
+  .sidebar .list-item {
+    font-size: 15.5px !important;
+    padding: 12px 12px !important;
+    min-height: 46px !important;
+  }
+}
+}
