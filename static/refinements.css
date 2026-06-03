@@ -3205,4 +3205,79 @@ pre .code-toolbar {
     animation: none !important;
   }
 }
+
+/* ============================================================
+   §37. Layout fixes — hamburger overlap + welcome input position
+   User feedback: brand title overlapped by hamburger, text area
+   sits too low/mid-page with empty space below.
+   ============================================================ */
+
+/* ---- 37.1 Sidebar header reserves room for the fixed hamburger ----
+   .hamburger-btn is position:fixed at top:12 left:9, width 30px.
+   On phone we already give it 44px; on desktop it's 30px → so the
+   sidebar-header needs ≥44px left padding to keep the brand title
+   clear of the hamburger glyph. */
+.sidebar .sidebar-header {
+  padding-left: 48px !important;
+  padding-right: 14px !important;
+  justify-content: flex-start !important;
+  gap: 8px;
+}
+
+/* When sidebar is anchored to the RIGHT side, hamburger lives on
+   the right edge — invert the padding. */
+.sidebar.right-side .sidebar-header,
+body.hamburger-right .sidebar .sidebar-header {
+  padding-left: 14px !important;
+  padding-right: 48px !important;
+  justify-content: flex-end !important;
+}
+
+/* ---- 37.2 Welcome state — keep input near bottom, not floating ----
+   style.css line ~1880 sets `.chat-container.welcome-active .chat-input-bar
+   { margin-bottom: 30vh }` which pushes the input up and leaves a huge
+   empty band below it. ChatGPT centers welcome copy near the top and
+   keeps the input docked. Mirror that. */
+.chat-container.welcome-active .chat-input-bar {
+  margin-bottom: 0 !important;
+  margin-top: auto !important; /* fall to the bottom of the flex column */
+}
+
+/* Welcome screen — push toward the upper-middle (40% from top), with
+   the input at the bottom. Generous breathing room between them. */
+.chat-container.welcome-active #welcome-screen,
+.chat-container.welcome-active .welcome-screen {
+  min-height: auto !important;
+  flex: 1 1 auto !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding-bottom: 40px !important;
+}
+
+/* On mobile the welcome screen action-rows sit above the input —
+   make sure the gap between them stays comfortable but no excess. */
+@media (max-width: 768px) {
+  .chat-container.welcome-active .chat-input-bar {
+    margin-bottom: max(8px, env(safe-area-inset-bottom)) !important;
+  }
+  .chat-container.welcome-active #welcome-screen {
+    padding-bottom: 20px !important;
+  }
+}
+
+/* Make sure the chat-container itself uses flex column so the
+   input docks at the bottom and welcome content fills above. */
+.chat-container {
+  display: flex !important;
+  flex-direction: column !important;
+}
+.chat-container .messages,
+.chat-container .messages-inner,
+#chat-messages {
+  flex: 1 1 auto !important;
+  min-height: 0;
+}
+.chat-input-bar {
+  flex-shrink: 0;
+}
 }
