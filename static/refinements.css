@@ -1497,90 +1497,206 @@ pre .code-toolbar {
   .sidebar.hidden #sidebar-new-chat-btn { display: none; }
   body.sidebar-collapsed #sidebar-new-chat-btn { display: none; }
 
-  /* ---- 30.4 Chat input — pill + separated "+" circle ---- */
+  /* ---- 30.4 Chat input — match actual two-row DOM
+     Real structure (from index.html):
+       .chat-input-bar
+         .chat-input-top        ← textarea + model picker = the PILL
+         #pinned-tools-bar      ← (usually empty, hide on mobile)
+         .chat-input-bottom     ← flat row of toolbar buttons + send
+           .chat-input-left     ← overflow + tool toggles
+           .chat-input-right    ← mode-toggle (Agent/Chat) + send-btn
+     We style the top row as ONE pill, the bottom row as a flat row.
+     No outer wrapper background, no double-nesting. */
   .chat-input-bar {
-    background: transparent;
-    box-shadow: none;
-    border: none;
-    border-radius: 0;
-    padding: 8px 12px max(12px, env(safe-area-inset-bottom));
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 6px 10px max(8px, env(safe-area-inset-bottom)) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+    align-items: stretch !important;
   }
 
-  /* The "+" attach button — separate floating circle */
-  .chat-input-bar .attach-btn,
-  .chat-input-bar #attach-btn,
-  .chat-input-bar .plus-btn,
-  .chat-input-bar button[title*="ttach" i],
-  .chat-input-bar button[aria-label*="ttach" i] {
-    width: 44px;
-    height: 44px;
-    min-width: 44px;
-    border-radius: 50% !important;
-    background: color-mix(in srgb, var(--fg) 5%, var(--panel)) !important;
-    border: 1px solid color-mix(in srgb, var(--fg) 8%, transparent) !important;
-    box-shadow: var(--shadow-sm);
-    padding: 0 !important;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
+  /* TOP ROW = the actual visible pill */
+  .chat-input-bar .chat-input-top {
+    background: color-mix(in srgb, var(--fg) 4%, var(--panel)) !important;
+    border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent) !important;
+    border-radius: 24px !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    padding: 4px 8px 4px 16px !important;
+    min-height: 48px !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 6px !important;
+    flex-wrap: nowrap !important;
+    overflow: hidden;
   }
 
-  /* Inner pill that wraps the textarea + mic + send */
-  .chat-input-bar > form,
-  .chat-input-bar .input-wrap,
-  .chat-input-bar .input-inner,
-  .chat-input-bar > div:not(.attach-btn) {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    background: color-mix(in srgb, var(--fg) 5%, var(--panel));
-    border: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
-    border-radius: 999px;
-    padding: 4px 6px 4px 16px;
-    min-height: 48px;
-    box-shadow: var(--shadow-sm);
-  }
-
-  .chat-input-bar textarea,
-  .chat-input-bar input[type="text"] {
+  /* Textarea inside the pill — flat, transparent, 16px to kill iOS zoom */
+  .chat-input-bar .chat-input-top textarea,
+  .chat-input-bar textarea#message {
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
-    padding: 8px 0 !important;
-    font-size: 16px; /* prevent iOS zoom on focus */
-    line-height: 1.4;
-    flex: 1;
-    min-height: 24px;
-    max-height: 120px;
+    outline: none !important;
+    padding: 10px 4px !important;
+    font-size: 16px !important; /* MUST be ≥16px to prevent iOS magnification on focus */
+    line-height: 1.35 !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    min-height: 24px !important;
+    max-height: 120px !important;
+    resize: none !important;
+    width: 100% !important;
   }
 
-  /* Send / mic / voice buttons — round, sit inside the pill */
-  .chat-input-bar .send-btn,
-  .chat-input-bar #send-btn,
-  .chat-input-bar button[type="submit"],
-  .chat-input-bar .voice-btn,
-  .chat-input-bar .mic-btn {
-    width: 40px;
-    height: 40px;
-    min-width: 40px;
-    border-radius: 50% !important;
-    padding: 0 !important;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  /* Model picker inside the pill — compact pill button */
+  .chat-input-bar .model-picker-wrap {
+    flex-shrink: 0;
+  }
+  .chat-input-bar .model-picker-btn {
+    background: transparent !important;
+    border: none !important;
+    padding: 4px 8px !important;
+    border-radius: 12px !important;
+    font-size: 13px !important;
+    color: color-mix(in srgb, var(--fg) 70%, transparent) !important;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chat-input-bar .model-picker-btn:hover {
+    background: color-mix(in srgb, var(--fg) 8%, transparent) !important;
+  }
+
+  /* Hide the empty pinned tools rail on phone to save space */
+  .chat-input-bar #pinned-tools-bar:empty {
+    display: none !important;
+  }
+
+  /* BOTTOM ROW = flat toolbar, NOT a pill */
+  .chat-input-bar .chat-input-bottom {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 4px !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 0 4px !important;
+    min-height: 40px !important;
+    box-shadow: none !important;
+  }
+
+  .chat-input-bar .chat-input-left {
+    display: flex !important;
+    align-items: center !important;
+    gap: 2px !important;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .chat-input-bar .chat-input-right {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
     flex-shrink: 0;
   }
 
-  .chat-input-bar .send-btn,
-  .chat-input-bar #send-btn,
-  .chat-input-bar button[type="submit"] {
+  /* Tool-toggle icon buttons (web, bash, rag, research, group, character, compare) */
+  .chat-input-bar .input-icon-btn,
+  .chat-input-bar .overflow-wrapper > button {
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    border-radius: 50% !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    background: transparent !important;
+    border: none !important;
+    color: color-mix(in srgb, var(--fg) 70%, transparent) !important;
+    box-shadow: none !important;
+  }
+  .chat-input-bar .input-icon-btn:hover,
+  .chat-input-bar .input-icon-btn.active {
+    background: color-mix(in srgb, var(--fg) 8%, transparent) !important;
+    color: var(--fg) !important;
+  }
+
+  /* Mode toggle (Agent / Chat) — pill segmented control */
+  .chat-input-bar .mode-toggle {
+    background: color-mix(in srgb, var(--fg) 6%, transparent) !important;
+    border-radius: 999px !important;
+    padding: 2px !important;
+    display: inline-flex;
+    gap: 0;
+  }
+  .chat-input-bar .mode-toggle button {
+    background: transparent !important;
+    border: none !important;
+    padding: 5px 12px !important;
+    border-radius: 999px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    color: color-mix(in srgb, var(--fg) 70%, transparent) !important;
+    min-height: 28px !important;
+  }
+  .chat-input-bar .mode-toggle button[aria-pressed="true"],
+  .chat-input-bar .mode-toggle button.active {
+    background: var(--panel) !important;
+    color: var(--fg) !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  }
+
+  /* Send button — dark filled circle, sits at the far right */
+  .chat-input-bar .send-btn {
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px !important;
+    border-radius: 50% !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
     background: var(--fg) !important;
     color: var(--bg) !important;
     border: none !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    flex-shrink: 0;
+  }
+  .chat-input-bar .send-btn svg {
+    width: 18px;
+    height: 18px;
+    color: var(--bg) !important;
+    stroke: var(--bg) !important;
+  }
+
+  /* Ghost-text overlay needs to be transparent and match textarea */
+  .chat-input-bar .ghost-text-overlay {
+    background: transparent !important;
+    font-size: 16px !important;
+    line-height: 1.35 !important;
+    padding: 10px 4px !important;
+  }
+
+  /* Global iOS-zoom defense: any focusable text input ≥16px */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  input[type="url"],
+  input:not([type]),
+  textarea,
+  select {
+    font-size: 16px !important;
   }
 
   /* ---- 30.5 Empty / welcome state — push action shortcuts above input ---- */
@@ -1628,6 +1744,52 @@ pre .code-toolbar {
 
   /* Hide the icon rail entirely on phone — drawer is the only nav */
   .icon-rail { display: none !important; }
+
+  /* ---- 30.7 Fix top content cutoff under iOS status bar ----
+     Pages were rendering messages flush against the very top, putting
+     text under the browser chrome / notch. Honor safe-area-inset-top
+     and reserve a small breathing zone for the hamburger button. */
+  body {
+    padding-top: env(safe-area-inset-top, 0);
+  }
+  .chat-container {
+    padding-top: max(56px, calc(56px + env(safe-area-inset-top, 0))) !important;
+  }
+  .chat-top-bar {
+    padding-top: max(8px, env(safe-area-inset-top, 0)) !important;
+    min-height: calc(48px + env(safe-area-inset-top, 0)) !important;
+  }
+  /* Messages list — ensure it doesn't underlap the (now taller) top bar */
+  .chat-container .messages,
+  .chat-container .messages-inner,
+  #chat-messages {
+    padding-top: 8px !important;
+  }
+
+  /* AI messages need a touch of side padding on phones */
+  .msg-ai {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+  .msg-ai .body {
+    font-size: 15.5px !important;
+    line-height: 1.55 !important;
+  }
+
+  /* "View thinking process" collapsible — quieter, less alarming */
+  .thinking-toggle,
+  .thinking-process-toggle,
+  details > summary.thinking,
+  .msg-ai details > summary {
+    background: color-mix(in srgb, var(--fg) 4%, transparent) !important;
+    border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent) !important;
+    color: color-mix(in srgb, var(--fg) 70%, transparent) !important;
+    border-radius: 10px !important;
+    padding: 10px 14px !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    margin: 8px 0 !important;
+  }
 }
 
 /* iPad / small tablet (769–1024px) — keep desktop layout but
@@ -1643,5 +1805,706 @@ pre .code-toolbar {
   }
   .chat-input-bar {
     border-radius: var(--radius-xl);
+  }
+}
+
+/* ============================================================
+   §32. Mobile bug fixes (≤768px) — URGENT patches:
+   1. Global iOS zoom-on-focus defense (all inputs, not just chat).
+   2. scroll-padding so keyboard doesn't hide scroll anchor.
+   3. Hide empty oval containers above Agent/Chat row.
+   4. Horizontal scroll for toolbar, send button stays right-aligned.
+   5. Hamburger overlap on top bar.
+   6. Backdrop scrim — broaden selector to cover JS class variants.
+   7. Compact input bar to <140px total height.
+   ============================================================ */
+@media (max-width: 768px) {
+
+  /* ---- 32.1 Global iOS zoom-on-focus defense ----
+     Any input/textarea/select that doesn't already hit 16px will
+     trigger Safari's magnification on focus. Override style.css's
+     12/13/14/15px rules across the entire app, not just chat. */
+  input,
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  input[type="url"],
+  input[type="tel"],
+  input[type="number"],
+  input[type="date"],
+  input[type="datetime-local"],
+  input[type="month"],
+  input[type="week"],
+  input[type="time"],
+  input:not([type]),
+  textarea,
+  select,
+  [contenteditable="true"],
+  [contenteditable=""] {
+    font-size: 16px !important;
+  }
+
+  /* Also catch common wrapped/scoped variants from style.css */
+  .modal input,
+  .modal textarea,
+  .modal select,
+  .sidebar input,
+  .sidebar textarea,
+  .admin-card input,
+  .admin-card textarea,
+  .admin-card select,
+  .settings-row input,
+  .settings-row textarea,
+  .settings-row select,
+  .form-field input,
+  .form-field textarea,
+  .form-field select,
+  .search-input,
+  .search-box input,
+  #search,
+  #search-input {
+    font-size: 16px !important;
+  }
+
+  /* ---- 32.2 Scroll padding so keyboard doesn't hide content ----
+     When the iOS soft keyboard opens, the focused message can end up
+     scrolled behind the top bar. Reserve scroll-padding-top so the
+     browser's auto-scroll-into-view leaves space for the status bar
+     + top bar, and scroll-padding-bottom for the input bar. */
+  html,
+  body,
+  .chat-container,
+  .chat-container .messages,
+  .chat-container .messages-inner,
+  #chat-messages {
+    scroll-padding-top: max(72px, calc(72px + env(safe-area-inset-top, 0))) !important;
+    scroll-padding-bottom: 160px !important;
+  }
+  /* Also ensure smooth in-keyboard adjustments don't jank */
+  .chat-container .messages,
+  #chat-messages {
+    overflow-anchor: auto;
+  }
+
+  /* ---- 32.3 Hide empty containers that render as orphan ovals ----
+     #pinned-tools-bar, .chat-input-bottom and .overflow-wrapper can be
+     empty when the user hasn't pinned tools / no overflow exists. Their
+     background+border+padding then paints an empty pill above the
+     Agent/Chat row. Collapse them when empty. */
+  #pinned-tools-bar:empty,
+  .chat-input-bar #pinned-tools-bar:empty,
+  .chat-input-bottom:empty,
+  .chat-input-bar .chat-input-bottom:empty,
+  .overflow-wrapper:empty,
+  .chat-input-bar .overflow-wrapper:empty,
+  .chat-input-left:empty,
+  .chat-input-right:empty {
+    display: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    min-height: 0 !important;
+    height: 0 !important;
+  }
+
+  /* Also catch the case where the bar contains only whitespace /
+     hidden children — neutralize stray background/border. */
+  #pinned-tools-bar {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+
+  /* ---- 32.4 Toolbar overflow — buttons scroll horizontally,
+     send button pinned to the right ---- */
+  .chat-input-bar .chat-input-left {
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    scrollbar-width: none !important;        /* Firefox */
+    -ms-overflow-style: none !important;     /* IE/Edge legacy */
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap !important;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .chat-input-bar .chat-input-left::-webkit-scrollbar {
+    display: none !important;                /* WebKit */
+    width: 0 !important;
+    height: 0 !important;
+  }
+  /* Each child stays its natural size — don't let flex shrink them */
+  .chat-input-bar .chat-input-left > * {
+    flex-shrink: 0 !important;
+  }
+
+  .chat-input-bar .chat-input-right {
+    flex-shrink: 0 !important;
+    margin-left: auto !important;
+  }
+
+  /* Make sure the bottom row itself doesn't wrap, so right stays right */
+  .chat-input-bar .chat-input-bottom {
+    flex-wrap: nowrap !important;
+    min-width: 0;
+  }
+
+  /* ---- 32.5 Hamburger overlap on top bar ----
+     Reserve a fixed left gutter on the top bar so the model picker
+     row never paints under the hamburger button. */
+  .chat-top-bar {
+    padding-left: 52px !important;
+  }
+  body.hamburger-right .chat-top-bar {
+    padding-left: 14px !important;
+    padding-right: 52px !important;
+  }
+
+  /* ---- 32.6 Backdrop scrim — broaden selectors ----
+     The original §6 rule relied on `body:not(.sidebar-collapsed)`. JS
+     may instead toggle `body.sidebar-open`, or set `aria-hidden` on
+     the sidebar, or simply remove the `.hidden` class. Cover the
+     common variants so the scrim always renders when the drawer is
+     open. */
+  body.sidebar-open::before,
+  body:has(.sidebar:not(.hidden))::before,
+  body:has(.sidebar[aria-hidden="false"])::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.42);
+    z-index: 199;
+    pointer-events: auto;
+    cursor: pointer;
+    touch-action: manipulation;
+    animation: refinements-scrim-in 0.2s ease-out;
+  }
+  /* When the drawer is closed (any of these signals), kill the scrim */
+  body.sidebar-collapsed::before,
+  body:not(.sidebar-open):not(:has(.sidebar:not(.hidden)))::before {
+    content: none !important;
+    display: none !important;
+  }
+
+  /* ---- 32.7 Reduce input-bar total height to <140px ----
+     Current ≈198px. Trim vertical padding, gaps, and button sizes;
+     the top pill keeps a comfy tap target but shrinks slightly. */
+  .chat-input-bar {
+    padding: 4px 8px max(6px, env(safe-area-inset-bottom)) !important;
+    gap: 4px !important;
+  }
+
+  .chat-input-bar .chat-input-top {
+    min-height: 42px !important;
+    padding: 2px 6px 2px 14px !important;
+    border-radius: 21px !important;
+  }
+
+  .chat-input-bar .chat-input-top textarea,
+  .chat-input-bar textarea#message {
+    padding: 8px 4px !important;
+    min-height: 22px !important;
+    max-height: 96px !important;
+    line-height: 1.3 !important;
+  }
+
+  .chat-input-bar .chat-input-bottom {
+    min-height: 36px !important;
+    padding: 0 2px !important;
+    gap: 2px !important;
+  }
+
+  .chat-input-bar .input-icon-btn,
+  .chat-input-bar .overflow-wrapper > button {
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    min-height: 32px !important;  /* override §14's 44 floor inside the bar */
+  }
+
+  .chat-input-bar .send-btn {
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
+  }
+  .chat-input-bar .send-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .chat-input-bar .mode-toggle button {
+    padding: 4px 10px !important;
+    min-height: 26px !important;
+    font-size: 12.5px !important;
+  }
+
+  /* Total budget:
+       4 (pad-top) + 42 (pill) + 4 (gap) + 36 (bottom row) + 6 (pad-bottom)
+       = 92px chrome + safe-area-inset (≈34px on iPhone notch) ≈ 126px.  */
+}
+
+/* ============================================================
+   §33. Mobile polish v2 (≤768px) — ChatGPT-iOS parity pass
+   (NOTE: spec called this "§31 Mobile polish v2" but §31/§32 are
+   already taken — same section, just renumbered to avoid collision.)
+
+   Targets remaining complaints after §30/§32:
+   - Cluttered metadata row under AI messages (tok/s, copy, x, ...)
+   - User bubble too wide / heavy / loud timestamp
+   - AI body cramped against edges / too small
+   - Send button clipping at viewport edge
+   - Empty/welcome state looks like dead white space
+   - Code blocks need touch-friendly affordances
+   - Model-picker pill too heavy for top of input
+   - Overall: more air, softer borders, gentler shadows
+   ============================================================ */
+@media (max-width: 768px) {
+
+  /* ---- 33.1 User message bubble — smaller, softer, quieter ---- */
+  .msg-user {
+    max-width: 80% !important;
+    margin-left: auto !important;
+    margin-right: 12px !important;
+    padding: 10px 14px !important;
+    border-radius: 18px 18px 6px 18px !important;
+    background: color-mix(in srgb, var(--fg) 7%, var(--bg)) !important;
+    border: 1px solid color-mix(in srgb, var(--fg) 6%, transparent) !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03) !important;
+    font-size: 15.5px !important;
+    line-height: 1.5 !important;
+  }
+
+  /* "You · 18:51" label inside the user bubble — make it nearly
+     invisible until needed. Covers .role and any timestamp span. */
+  .msg-user .role,
+  .msg-user .msg-role,
+  .msg-user .timestamp,
+  .msg-user .msg-time,
+  .msg-user time {
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    opacity: 0.45 !important;
+    margin-bottom: 2px !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+  }
+
+  /* ---- 33.2 AI message body — readable, full-bleed, generous ---- */
+  .msg-ai {
+    padding: 8px 16px 4px 16px !important;
+    margin-bottom: 4px !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  .msg-ai .body,
+  .msg-ai .msg-body,
+  .msg-ai .content {
+    font-size: 16px !important;
+    line-height: 1.6 !important;
+    max-width: 100% !important;
+    color: var(--fg) !important;
+    letter-spacing: -0.003em !important;
+  }
+
+  .msg-ai .body p,
+  .msg-ai .body > * {
+    margin-top: 0;
+    margin-bottom: 12px;
+  }
+  .msg-ai .body > *:last-child {
+    margin-bottom: 0;
+  }
+  .msg-ai .body ul,
+  .msg-ai .body ol {
+    padding-left: 22px;
+    margin: 8px 0 12px;
+  }
+  .msg-ai .body li {
+    margin: 4px 0;
+  }
+  .msg-ai .body h1,
+  .msg-ai .body h2,
+  .msg-ai .body h3,
+  .msg-ai .body h4 {
+    margin-top: 18px;
+    margin-bottom: 8px;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+  }
+  .msg-ai .body h1 { font-size: 20px; font-weight: 650; }
+  .msg-ai .body h2 { font-size: 18px; font-weight: 650; }
+  .msg-ai .body h3 { font-size: 16.5px; font-weight: 600; }
+
+  /* AI role label ("Assistant" / model name) — quiet */
+  .msg-ai > .role,
+  .msg-ai .msg-role {
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    opacity: 0.55 !important;
+    margin-bottom: 6px !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+  }
+
+  /* ---- 33.3 AI metadata row (tok/s · copy · X · ... · %)
+     Targets any plausible container; falls back to direct buttons
+     inside .msg-ai. Goal: a tiny, low-opacity strip that doesn't
+     fight the message for attention. */
+  .msg-ai .msg-meta,
+  .msg-ai .msg-actions,
+  .msg-ai .msg-toolbar,
+  .msg-ai .msg-footer,
+  .msg-ai .message-actions,
+  .msg-ai .action-row,
+  .msg .msg-meta,
+  .msg .msg-actions {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 14px !important;
+    padding: 6px 0 2px !important;
+    margin-top: 4px !important;
+    opacity: 0.55 !important;
+    font-size: 11.5px !important;
+    font-weight: 500 !important;
+    color: color-mix(in srgb, var(--fg) 55%, transparent) !important;
+    background: transparent !important;
+    border: none !important;
+    flex-wrap: wrap !important;
+  }
+  .msg-ai .msg-meta:hover,
+  .msg-ai .msg-actions:hover,
+  .msg-ai .msg-toolbar:hover {
+    opacity: 0.85 !important;
+  }
+
+  /* Individual buttons inside that row — pill-less, icon-only */
+  .msg-ai .msg-meta button,
+  .msg-ai .msg-actions button,
+  .msg-ai .msg-toolbar button,
+  .msg-ai .msg-footer button,
+  .msg-ai .action-row button,
+  .msg-ai button[title*="copy" i],
+  .msg-ai button[title*="dismiss" i],
+  .msg-ai button[title*="more" i],
+  .msg-ai button[aria-label*="copy" i],
+  .msg-ai button[aria-label*="dismiss" i],
+  .msg-ai button[aria-label*="more" i],
+  .msg-ai button[aria-label*="options" i] {
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px !important;
+    min-height: 28px !important;
+    padding: 0 !important;
+    border-radius: 8px !important;
+    background: transparent !important;
+    border: none !important;
+    color: color-mix(in srgb, var(--fg) 60%, transparent) !important;
+    box-shadow: none !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    opacity: 0.75;
+    transition: opacity 0.12s ease, background 0.12s ease;
+  }
+  .msg-ai .msg-meta button:hover,
+  .msg-ai .msg-actions button:hover,
+  .msg-ai .msg-toolbar button:hover,
+  .msg-ai button[title*="copy" i]:hover,
+  .msg-ai button[title*="dismiss" i]:hover {
+    background: color-mix(in srgb, var(--fg) 7%, transparent) !important;
+    opacity: 1;
+  }
+  .msg-ai .msg-meta button svg,
+  .msg-ai .msg-actions button svg,
+  .msg-ai .msg-toolbar button svg {
+    width: 14px !important;
+    height: 14px !important;
+  }
+
+  /* tok/s text + percentage — tiny tabular-nums stat chips */
+  .msg-ai .tok-rate,
+  .msg-ai .tokens-per-second,
+  .msg-ai .toks-per-sec,
+  .msg-ai .msg-stats,
+  .msg-ai .msg-pct,
+  .msg-ai [class*="tok"],
+  .msg-ai [class*="rate"] {
+    font-variant-numeric: tabular-nums;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    opacity: 0.55 !important;
+    letter-spacing: 0 !important;
+  }
+
+  /* ---- 33.4 "View thinking process" — further toned down,
+     gentle disclosure pill, neutral grey ---- */
+  .msg-ai details {
+    margin: 8px 0 !important;
+  }
+  .msg-ai details > summary,
+  .thinking-toggle,
+  .thinking-process-toggle,
+  details > summary.thinking {
+    background: transparent !important;
+    border: 1px solid color-mix(in srgb, var(--fg) 8%, transparent) !important;
+    color: color-mix(in srgb, var(--fg) 60%, transparent) !important;
+    border-radius: 10px !important;
+    padding: 8px 12px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    cursor: pointer;
+    list-style: none;
+    display: inline-flex !important;
+    align-items: center;
+    gap: 6px;
+  }
+  .msg-ai details > summary::-webkit-details-marker {
+    display: none;
+  }
+  .msg-ai details > summary::before {
+    content: "▸";
+    font-size: 10px;
+    opacity: 0.6;
+    transition: transform 0.15s ease;
+    display: inline-block;
+  }
+  .msg-ai details[open] > summary::before {
+    transform: rotate(90deg);
+  }
+  .msg-ai details[open] > summary {
+    background: color-mix(in srgb, var(--fg) 3%, transparent) !important;
+  }
+
+  /* ---- 33.5 Send button NEVER clips at right edge ---- */
+  .chat-input-bar {
+    overflow: visible !important;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    box-sizing: border-box !important;
+  }
+  .chat-input-bar .chat-input-bottom {
+    padding-right: 0 !important;
+    padding-left: 0 !important;
+    overflow: visible !important;
+    gap: 6px !important;
+  }
+  .chat-input-bar .chat-input-right {
+    margin-right: 0 !important;
+    padding-right: 0 !important;
+    flex-shrink: 0 !important;
+  }
+  .chat-input-bar .send-btn {
+    margin-right: 0 !important;
+    margin-left: 2px !important;
+  }
+
+  /* Left toolbar scrolls horizontally if too many buttons; soft
+     fade-mask on the right so users see "more is over there". */
+  .chat-input-bar .chat-input-left {
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+    flex-wrap: nowrap !important;
+    mask-image: linear-gradient(to right, black calc(100% - 16px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, black calc(100% - 16px), transparent 100%);
+  }
+  .chat-input-bar .chat-input-left::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+
+  /* ---- 33.6 Model-picker pill — quiet chip in the top row ---- */
+  .chat-input-bar .model-picker-btn,
+  .chat-input-bar #model-picker-wrap > button,
+  #model-picker-wrap button,
+  .model-picker-trigger {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 4px 10px !important;
+    border-radius: 999px !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    color: color-mix(in srgb, var(--fg) 55%, transparent) !important;
+    min-height: 28px !important;
+    max-width: 140px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    letter-spacing: -0.005em;
+    line-height: 1.2;
+  }
+  .chat-input-bar .model-picker-btn:hover,
+  #model-picker-wrap button:hover {
+    background: color-mix(in srgb, var(--fg) 6%, transparent) !important;
+    color: var(--fg) !important;
+  }
+  /* Cost / msg-count secondary text inside the pill */
+  .chat-input-bar .model-picker-btn .meta,
+  .chat-input-bar .model-picker-btn .cost,
+  .chat-input-bar .model-picker-btn .msgs {
+    opacity: 0.65;
+    font-weight: 400;
+    margin-left: 4px;
+  }
+
+  /* ---- 33.7 Welcome / empty state — friendly, not blank ---- */
+  #welcome-screen,
+  .welcome-screen,
+  .chat-empty-state,
+  .empty-state {
+    min-height: 60dvh !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 32px 24px !important;
+    text-align: center !important;
+    gap: 16px !important;
+  }
+  #welcome-screen .welcome-name,
+  .welcome-name,
+  .welcome-screen h1,
+  .empty-state h1,
+  .empty-state h2 {
+    font-size: 28px !important;
+    font-weight: 650 !important;
+    letter-spacing: -0.02em !important;
+    color: var(--fg) !important;
+    margin: 0 !important;
+    opacity: 0.95;
+  }
+  #welcome-screen .welcome-sub,
+  .welcome-sub,
+  .welcome-screen p,
+  .empty-state p {
+    font-size: 15px !important;
+    line-height: 1.5 !important;
+    color: color-mix(in srgb, var(--fg) 55%, transparent) !important;
+    max-width: 32ch !important;
+    margin: 0 !important;
+  }
+
+  /* If absolutely no welcome markup exists, show a centered
+     brand wordmark on the empty messages list so it doesn't look
+     like a broken page. */
+  .chat-container .messages:empty::before,
+  #chat-messages:empty::before {
+    content: "Odysseus";
+    display: block;
+    text-align: center;
+    margin-top: 30dvh;
+    font-family: var(--font-family-ui);
+    font-size: 26px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    color: color-mix(in srgb, var(--fg) 35%, transparent);
+    pointer-events: none;
+  }
+
+  /* ---- 33.8 Code blocks — touch-friendly + clean ---- */
+  .msg-ai pre,
+  .msg pre {
+    background: color-mix(in srgb, var(--fg) 5%, var(--bg)) !important;
+    border: 1px solid color-mix(in srgb, var(--fg) 8%, transparent) !important;
+    border-radius: 12px !important;
+    padding: 12px 14px !important;
+    margin: 10px -4px !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    font-family: var(--font-family-code) !important;
+    font-size: 13px !important;
+    line-height: 1.55 !important;
+    position: relative;
+    scrollbar-width: thin;
+  }
+  .msg-ai pre code,
+  .msg pre code {
+    font-family: var(--font-family-code) !important;
+    font-size: 13px !important;
+    white-space: pre;
+  }
+  /* Copy button on code blocks — always visible on touch */
+  .msg-ai pre .copy-btn,
+  .msg-ai pre .code-copy-btn,
+  .msg pre .copy-btn,
+  .msg pre .copy-button {
+    position: absolute !important;
+    top: 6px !important;
+    right: 6px !important;
+    opacity: 0.7 !important;
+    background: color-mix(in srgb, var(--fg) 8%, var(--bg)) !important;
+    border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent) !important;
+    border-radius: 6px !important;
+    padding: 4px 8px !important;
+    font-size: 11px !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    width: auto !important;
+    height: auto !important;
+  }
+
+  /* Inline code — slightly tighter on phone */
+  .msg-ai :not(pre) > code,
+  .msg :not(pre) > code {
+    font-size: 0.88em !important;
+    padding: 1px 5px !important;
+  }
+
+  /* ---- 33.9 Overall airiness: softer borders, gentler shadows ---- */
+  .chat-input-bar .chat-input-top {
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03) !important;
+    border-color: color-mix(in srgb, var(--fg) 8%, transparent) !important;
+  }
+  .chat-input-bar .chat-input-top:focus-within {
+    border-color: color-mix(in srgb, var(--fg) 14%, transparent) !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05),
+                0 0 0 3px color-mix(in srgb, var(--fg) 4%, transparent) !important;
+  }
+
+  /* More whitespace between consecutive messages */
+  .msg + .msg {
+    margin-top: 8px !important;
+  }
+  .msg-ai + .msg-user,
+  .msg-user + .msg-ai {
+    margin-top: 16px !important;
+  }
+
+  /* Soften scrollbar where it does appear */
+  .chat-container .messages::-webkit-scrollbar,
+  #chat-messages::-webkit-scrollbar {
+    width: 0;
+    background: transparent;
+  }
+
+  /* ---- 33.10 Belt-and-braces iOS zoom kill (any input ≥16px) ---- */
+  input,
+  textarea,
+  select,
+  [contenteditable="true"],
+  [contenteditable=""] {
+    font-size: 16px !important;
+  }
+
+  /* ---- 33.11 Light-theme tuning for the v2 pass ---- */
+  :root.light .msg-user {
+    background: #f3f4f6 !important;
+    border-color: rgba(0,0,0,0.05) !important;
+  }
+  :root.light .msg-ai pre,
+  :root.light .msg pre {
+    background: #f6f7f9 !important;
+    border-color: rgba(0,0,0,0.06) !important;
+  }
+  :root.light .chat-input-bar .chat-input-top {
+    background: #ffffff !important;
+    border-color: rgba(0,0,0,0.08) !important;
   }
 }
