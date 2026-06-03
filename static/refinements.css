@@ -3126,10 +3126,11 @@ pre .code-toolbar {
   margin-bottom: 6px !important;
 }
 
-/* ---- 36.6 Welcome screen — friendly, ChatGPT-like ---- */
-#welcome-screen,
-.welcome-screen,
-.chat-empty-state {
+/* ---- 36.6 Welcome screen — friendly, ChatGPT-like ----
+   Scoped to welcome-active state so it never overlaps active threads. */
+.chat-container.welcome-active #welcome-screen,
+.chat-container.welcome-active .welcome-screen,
+.chat-container.welcome-active .chat-empty-state {
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
@@ -3137,6 +3138,13 @@ pre .code-toolbar {
   min-height: 60dvh !important;
   text-align: center !important;
   padding: 20px !important;
+}
+/* When NOT in welcome state, hide the welcome content (in case the
+   server still renders it under the message thread). */
+.chat-container:not(.welcome-active) #welcome-screen,
+.chat-container:not(.welcome-active) .welcome-screen,
+.chat-container:not(.welcome-active) .chat-empty-state {
+  display: none !important;
 }
 #welcome-screen .welcome-name,
 .welcome-screen .brand,
